@@ -1,14 +1,10 @@
 """
-DSA Visual Tutor - Backend (No Auth Version)
-FastAPI + Groq powered API for:
-  1. /api/explain      -> plain-language explanation (English or Hinglish)
-  2. /api/approaches   -> ranked solution approaches with complexity + reasoning
-  3. /api/dry-run      -> step-by-step JSON trace (array OR tree/graph shape) for animation
-  4. /api/translate    -> translate already-shown content into English / Hinglish / Hindi
-  5. /api/run-code     -> execute user code via the sandboxed Piston API
+DSA Visual Tutor - Backend (Production Ready)
+FastAPI + Groq powered API
 """
 
 import os
+import sys
 import json
 import re
 import subprocess
@@ -24,31 +20,39 @@ from groq import Groq
 
 load_dotenv()
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-MODEL_NAME = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
-client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+# Primary aur Fallback models की list (agar ek deprecate ho toh dusra turant kaam karega)
+ PRIMARY_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+FALLBACK_MODELS = [
+    PRIMARY_MODEL,
+    "llama-3.1-8b-instant",
+    "gemma2-9b-it",
+    "mixtral-8x7b-32768",
+]
 
-PISTON_URL = "https://emkc.org/api/v2/piston"
+# Render ke httpx compatibility bug se bachne ke liye custom http_client pass kiya hai
+client = None
+if GROQ_API_KEY:
+    try:
+        client = Groq(api_key=GROQ_API_KEY, http_client=httpx.Client())
+    except Exception:
+        client = Groq(api_key=GROQ_API_KEY)
+
 LANGUAGE_MAP = {
     "Python": "python",
     "C++": "cpp",
     "Java": "java",
     "JavaScript": "javascript",
 }
-FILE_EXTENSIONS = {
-    "python": "main.py",
-    "cpp": "main.cpp",
-    "java": "Main.java",
-    "javascript": "main.js",
-}
-_piston_runtime_cache: dict = {}
 
 app = FastAPI(title="DSA Visual Tutor API")
 
+# Explicit CORS setup taaki browser 'Failed to fetch' na de
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -58,13 +62,13 @@ app.add_middleware(
 
 class QuestionRequest(BaseModel):
     question: str
-    explain_language: Optional[str] = "english"  # "english" or "hinglish"
+    explain_language: Optional[str] = "english"
 
 
 class DryRunRequest(BaseModel):
     question: str
     approach: str
-    narrate_language: Optional[str] = "english"  # "english" or "hinglish"
+    narrate_language: Optional[str] = "english"
 
 
 class RunCodeRequest(BaseModel):
@@ -75,30 +79,45 @@ class RunCodeRequest(BaseModel):
 
 class TranslateRequest(BaseModel):
     text: str
-    target: str = "english"  # "english", "hinglish", or "hindi"
+    target: str = "english"
 
 
-# ---------- Helper: call Groq & force clean JSON ----------
+# ---------- Helper: Fault-Tolerant Groq Caller ----------
 
-def call_llm(system_prompt: str, user_prompt: str) -> str:
+def call_llm(system_prompt: str, user_prompt: str, json_mode: bool = False) -> str:
     if client is None:
         raise HTTPException(
             status_code=500,
-            detail="GROQ_API_KEY not set. Add it to backend/.env"
+            detail="GROQ_API_KEY is missing on server. Add it in Render -> Environment."
         )
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.3,
-    )
-    return response.choices[0].message.content
+
+    last_error = None
+    # Har model ko try karega jab tak success na mile
+    for model_name in FALLBACK_MODELS:
+        try:
+            kwargs = {
+                "model": model_name,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.3,
+            }
+            if json_mode:
+                kwargs["response_format"] = {"type": "json_object"}
+
+            response = client.chat.completions.create(**kwargs)
+            return response.choices[0].message.content
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+    # Agar saare models fail ho jayein (jaise Invalid API key), toh clean HTTPException dega (CORS break nahi hoga)
+    raise HTTPException(status_code=502, detail=f"Groq API Error: {last_error}")
 
 
 def extract_json(raw_text: str):
-    """LLMs sometimes wrap JSON in ```json fences or add stray text. Strip it."""
+    """Clean markdown fences and extract valid JSON."""
     cleaned = re.sub(r"```json|```", "", raw_text).strip()
     match = re.search(r"(\{.*\}|\[.*\])", cleaned, re.DOTALL)
     if match:
@@ -110,7 +129,11 @@ def extract_json(raw_text: str):
 
 @app.get("/")
 def health():
-    return {"status": "ok", "model": MODEL_NAME}
+    return {
+        "status": "ok",
+        "api_key_configured": bool(GROQ_API_KEY),
+        "primary_model": PRIMARY_MODEL
+    }
 
 
 @app.post("/api/explain")
@@ -119,9 +142,7 @@ def explain_question(req: QuestionRequest):
         language_instruction = (
             "Respond in natural Hinglish (Hindi-English mix, written in Roman/English script "
             "— NOT Devanagari), the way an Indian CS student casually explains things to a "
-            "friend. Keep technical terms (array, pointer, time complexity, etc.) in English "
-            "since that's how students actually say them; mix in Hindi for the explanatory "
-            "and connecting words. Keep it natural, not forced."
+            "friend. Keep technical terms (array, pointer, time complexity, etc.) in English."
         )
     else:
         language_instruction = "Respond in clear, simple English."
@@ -149,7 +170,12 @@ def get_approaches(req: QuestionRequest):
     )
     raw = call_llm(system_prompt, req.question)
     try:
-        approaches = extract_json(raw)
+        parsed = extract_json(raw)
+        # Handle case if LLM wraps array inside an object key like {"approaches": [...]}
+        if isinstance(parsed, dict) and "approaches" in parsed:
+            approaches = parsed["approaches"]
+        else:
+            approaches = parsed
     except Exception:
         raise HTTPException(status_code=502, detail="LLM returned invalid JSON. Try again.")
     return {"approaches": approaches}
@@ -160,67 +186,54 @@ def dry_run(req: DryRunRequest):
     if req.narrate_language == "hinglish":
         action_language_instruction = (
             "Write every 'action' description in natural Hinglish (Hindi-English mix, "
-            "Roman script — NOT Devanagari), the way an Indian CS student casually narrates "
-            "what's happening. Keep technical terms (pointer, node, index, visited, etc.) in "
-            "English since that's how students actually say them."
+            "Roman script — NOT Devanagari). Keep technical terms in English."
         )
     else:
         action_language_instruction = "Write every 'action' description in clear, proper English."
 
     system_prompt = (
-        "You are a DSA visualizer engine for a student-facing learning tool. Given a problem "
-        "and a chosen approach, simulate the algorithm on a SMALL sample input and return "
-        "ONLY valid JSON (no markdown, no commentary, no code fences).\n\n"
-        "STEP 1 — Decide the structure_type:\n"
+        "You are a DSA visualizer engine. Given a problem and approach, simulate the algorithm "
+        "on a SMALL sample input and return ONLY valid JSON (no markdown, no code fences).\n\n"
+        "STEP 1 — Decide structure_type:\n"
         "- \"array\" for array/string/two-pointer/sliding-window/sorting/searching problems.\n"
         "- \"tree\" for binary tree / BST problems.\n"
         "- \"graph\" for graph traversal / shortest-path / connectivity problems.\n\n"
-        "STEP 2 — Return JSON in ONE of these two shapes, matching structure_type:\n\n"
+        "STEP 2 — Return JSON in ONE of these two shapes:\n\n"
         "=== SHAPE A (structure_type = \"array\") ===\n"
         "{\n"
         '  "structure_type": "array",\n'
         '  "input": [ ... ],\n'
         '  "steps": [\n'
         "    {\n"
-        '      "array": [ ... state AFTER this step\'s change, if any ... ],\n'
-        '      "highlight": [ indices touched this step ],\n'
+        '      "array": [ ... ],\n'
+        '      "highlight": [ 0, 1 ],\n'
         '      "pointers": { "i": 0, "j": 1 },\n'
-        '      "action": "2-3 full sentences explaining, in proper student-friendly language: '
-        'which pointer(s) are involved, what values they are looking at right now, what '
-        'comparison or operation is happening, WHY it happens, and how the pointer(s) will '
-        'move next. This should read like a tutor narrating the algorithm, not a terse log line.",\n'
+        '      "action": "2-3 sentences explaining the step clearly.",\n'
         '      "swapped": false\n'
         "    }\n"
         "  ]\n"
         "}\n\n"
         "=== SHAPE B (structure_type = \"tree\" or \"graph\") ===\n"
         "{\n"
-        '  "structure_type": "tree" | "graph",\n'
-        '  "nodes": [ { "id": "A", "value": 5, "x": 0-700, "y": 0-320 } ... up to 10 nodes, '
-        "laid out with sensible non-overlapping coordinates — a top-down hierarchy for trees, "
-        "a roughly circular/force-like spread for graphs ],\n"
-        '  "edges": [ { "from": "A", "to": "B" } ... ],\n'
+        '  "structure_type": "tree",\n'
+        '  "nodes": [ { "id": "A", "value": 5, "x": 350, "y": 50 } ],\n'
+        '  "edges": [ { "from": "A", "to": "B" } ],\n'
         '  "steps": [\n'
         "    {\n"
         '      "current": "A",\n'
-        '      "visited": [ "A", "B" ],\n'
-        '      "frontier": [ "C", "D" ],\n'
-        '      "active_edge": { "from": "A", "to": "B" } | null,\n'
-        '      "pointers": { "queue_front": "C" },\n'
-        '      "action": "2-3 full sentences explaining what node is being visited, why it was '
-        'chosen next (e.g. from the front of the queue / top of the stack / smallest distance), '
-        'what its neighbours are, and what happens as a result — written like a tutor narrating, '
-        'not a terse log line."\n'
+        '      "visited": [ "A" ],\n'
+        '      "frontier": [ "B" ],\n'
+        '      "active_edge": { "from": "A", "to": "B" },\n'
+        '      "pointers": { "curr": "A" },\n'
+        '      "action": "2-3 sentences explaining the step clearly."\n'
         "    }\n"
         "  ]\n"
         "}\n\n"
-        "General rules: keep steps between 5 and 15. Use a small sample (max 7 array elements, "
-        "or max 10 tree/graph nodes) so it stays easy to follow. "
-        f"{action_language_instruction} "
-        "Pick exactly one shape based on structure_type and do not mix fields from the other shape."
+        "Keep steps between 5 and 12. "
+        f"{action_language_instruction}"
     )
     user_prompt = f"Problem: {req.question}\nApproach to simulate: {req.approach}"
-    raw = call_llm(system_prompt, user_prompt)
+    raw = call_llm(system_prompt, user_prompt, json_mode=True)
     try:
         trace = extract_json(raw)
     except Exception:
@@ -232,64 +245,34 @@ def dry_run(req: DryRunRequest):
 def translate_text(req: TranslateRequest):
     if req.target == "hinglish":
         instruction = (
-            "Translate/rewrite the following text into natural Hinglish (Hindi-English mix, "
-            "Roman script — NOT Devanagari), the way an Indian CS student casually explains "
-            "things. Keep technical terms (array, pointer, complexity, etc.) in English; mix "
-            "Hindi for the connecting and explanatory words. Keep the same meaning and length."
+            "Translate into natural Hinglish (Roman script — NOT Devanagari). "
+            "Keep technical terms in English."
         )
     elif req.target == "hindi":
         instruction = (
-            "Translate the following text into clear, simple Hindi using Devanagari script. "
-            "You may keep well-established technical/programming terms (array, pointer, "
-            "complexity, function names, code snippets) in English/Roman script since that is "
-            "standard practice, but translate all explanatory sentences fully into Hindi."
+            "Translate into simple Hindi using Devanagari script. Keep technical terms in English."
         )
     else:
-        instruction = "Translate/rewrite the following text into clear, simple English."
+        instruction = "Translate into clear, simple English."
 
-    system_prompt = (
-        f"{instruction} Return ONLY the translated text, no preamble, no quotes, "
-        "no markdown formatting."
-    )
+    system_prompt = f"{instruction} Return ONLY the translated text, no preamble or quotes."
     translated = call_llm(system_prompt, req.text)
     return {"text": translated}
-
-
-# ---------- Compiler (Piston API) ----------
-
-async def get_piston_version(language_id: str) -> str:
-    """Piston needs an exact runtime version per language; fetch + cache it."""
-    if language_id in _piston_runtime_cache:
-        return _piston_runtime_cache[language_id]
-    try:
-        async with httpx.AsyncClient(timeout=15) as http_client:
-            res = await http_client.get(f"{PISTON_URL}/runtimes")
-            res.raise_for_status()
-            runtimes = res.json()
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"Could not reach code execution service: {e}")
-
-    for rt in runtimes:
-        if rt["language"] == language_id:
-            _piston_runtime_cache[language_id] = rt["version"]
-            return rt["version"]
-    raise HTTPException(status_code=400, detail=f"Unsupported language: {language_id}")
 
 
 @app.post("/api/run-code")
 async def run_code(req: RunCodeRequest):
     language_id = LANGUAGE_MAP.get(req.language, "python")
-    
-    # Agar Python hai toh local safe execution karwa do (Piston whitelist restriction bypass!)
+
     if language_id == "python":
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
             f.write(req.code)
             temp_file_name = f.name
 
         try:
-            # subprocess ke zariye python script run karo (5 seconds timeout ke sath)
+            # sys.executable ensures exact Python binary on both Windows & Linux (Render)
             process = subprocess.run(
-                ["python", temp_file_name],
+                [sys.executable, temp_file_name],
                 input=req.stdin or "",
                 text=True,
                 capture_output=True,
@@ -327,7 +310,6 @@ async def run_code(req: RunCodeRequest):
                 "version": "3.x"
             }
 
-    # Baki languages ke liye Piston ki jagah alternative public API ya mock response
     return {
         "stdout": f"Executed ({req.language}):\n" + req.code,
         "stderr": "",
