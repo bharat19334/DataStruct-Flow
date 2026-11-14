@@ -1,4 +1,4 @@
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "https://datastruct-flow-backend.onrender.com";
 
 const activeQuestion = localStorage.getItem("dsa_compiler_question");
 

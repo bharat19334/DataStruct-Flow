@@ -1,5 +1,5 @@
 // Direct local backend URL (works whether opened via Live Server, localhost, or file://)
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "https://datastruct-flow-backend.onrender.com";
 
 const questionInput = document.getElementById("questionInput");
 const runBtn = document.getElementById("runBtn");
