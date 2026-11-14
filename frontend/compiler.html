@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compiler — DSA Visual Tutor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="theme.js"></script>
+
+<!-- CodeMirror -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+</head>
+<body class="bg-grid">
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <a href="index.html" class="sidebar-brand brand" style="text-decoration:none;">
+      <span class="brand-prompt">&gt;_</span>
+      <span class="brand-name">dsa<span class="brand-accent">.tutor</span></span>
+    </a>
+    <nav class="sidebar-nav">
+      <a href="dashboard.html" class="sidebar-link"><span class="num">01</span> Dashboard</a>
+      <a href="practice.html" class="sidebar-link"><span class="num">02</span> Practice</a>
+      <a href="progress.html" class="sidebar-link"><span class="num">03</span> Progress</a>
+      <a href="history.html" class="sidebar-link"><span class="num">04</span> History</a>
+      <a href="compiler.html" class="sidebar-link active" onclick="localStorage.removeItem('dsa_compiler_question')"><span class="num">05</span> Compiler</a>
+    </nav>
+  </aside>
+
+  <div class="app-main">
+    <header class="topbar topbar-slim">
+      <div class="topbar-status"><span class="dot dot-live"></span> <span id="compilerHeaderMode">compiler workspace</span></div>
+    </header>
+
+    <!-- 1. STANDARD COMPILER VIEW -->
+<!-- 1. STANDARD COMPILER VIEW (2 Columns with Resizer) -->
+    <main class="wrap" id="standardCompilerWrap">
+      <div class="compiler-resizer-container" id="compilerResizerContainer">
+        
+        <!-- LEFT COLUMN: Code & Run -->
+        <section class="panel compiler-panel" id="compilerLeftPanel">
+          <div class="panel-label-row">
+            <div class="panel-label">CODE &amp; RUN</div>
+            <select id="codeLangSelect" class="speed-select">
+              <option value="Python">Python</option>
+              <option value="C++">C++</option>
+              <option value="Java">Java</option>
+              <option value="JavaScript">JavaScript</option>
+            </select>
+          </div>
+          <textarea id="codeEditor" class="code-editor" spellcheck="false" placeholder="// write your code here...">print("Hello, DSA!")</textarea>
+
+          <div class="stdin-row">
+            <label class="stdin-label" for="stdinInput">stdin (optional input)</label>
+            <textarea id="stdinInput" class="stdin-editor" spellcheck="false" placeholder="input values here..."></textarea>
+          </div>
+
+          <button id="runCodeBtn" class="btn-run">
+            <span class="btn-run-text">▶ run code</span>
+            <span class="btn-run-key">⏎</span>
+          </button>
+        </section>
+
+        <!-- RESIZE HANDLE -->
+        <div class="compiler-splitter" id="compilerSplitter" title="Drag to resize columns"></div>
+
+        <!-- RIGHT COLUMN: Execution Output -->
+        <section class="panel compiler-output-panel" id="compilerRightPanel">
+          <div class="panel-label">EXECUTION OUTPUT</div>
+          <div id="codeOutput" class="code-output" style="margin-top:0; border-top:none; padding-top:0;">
+            <div class="output-header">
+              <span id="outputStatus" class="output-status success">READY</span>
+              <span id="outputMeta" class="output-meta"></span>
+            </div>
+            <pre id="outputStdout" class="output-block" style="min-height: 280px;">Run your code to see output here...</pre>
+            <pre id="outputStderr" class="output-block output-error hidden"></pre>
+          </div>
+        </section>
+
+      </div>
+      <div id="errorBox" class="error-box hidden"></div>
+    </main>
+
+    <!-- 2. LEETCODE EXACT MATCH SPLIT VIEW -->
+    <main class="wrap leetcode-split-wrap hidden" id="leetcodeSplitWrap">
+      <div class="leetcode-split-grid">
+        
+        <!-- LEFT: Question Description Panel -->
+        <section class="panel leetcode-left-panel">
+          <div class="lc-top-tabs">
+            <button class="lc-tab active">📋 Description</button>
+            <button class="lc-tab">💡 Editorial</button>
+            <button class="lc-tab">💬 Solutions</button>
+            <button class="lc-tab">📊 Submissions</button>
+          </div>
+          <div class="lc-problem-content">
+            <h2 id="lcProblemTitle" class="lc-title">Problem Statement</h2>
+            <div class="lc-difficulty-badge-row">
+              <span class="badge-medium">Practice Sheet</span>
+              <span class="solved-tag">Active Problem</span>
+            </div>
+            <div class="lc-desc-body" id="lcProblemDescText">
+              Loading question details...
+            </div>
+          </div>
+        </section>
+
+        <!-- RIGHT: Code Editor on Top, Testcase & Result Panel on Bottom -->
+        <div class="leetcode-right-stack">
+          
+          <!-- TOP RIGHT: Code Editor Panel -->
+          <section class="panel leetcode-editor-panel">
+            <div class="lc-editor-topbar">
+              <div class="lc-editor-top-left">
+                <span class="lc-code-tab active">💻 Code</span>
+                <select id="codeLangSelect2" class="speed-select" style="margin-left: 10px;">
+                  <option value="Python">Python</option>
+                  <option value="C++">C++</option>
+                  <option value="Java">Java</option>
+                  <option value="JavaScript">JavaScript</option>
+                </select>
+              </div>
+              <div class="lc-editor-top-right">
+                <button id="runCodeBtn2" class="btn-solid" style="padding: 6px 16px; font-size: 12px;">▶ Run</button>
+              </div>
+            </div>
+            <textarea id="codeEditor2" class="code-editor" spellcheck="false"></textarea>
+          </section>
+
+          <!-- BOTTOM RIGHT: Testcase & Test Result Panel -->
+          <section class="panel leetcode-output-panel">
+            <div class="lc-sub-tabs">
+              <button class="lc-sub-tab active" id="btnTabTestcase" onclick="switchLcSubTab('testcase')">✓ Testcase</button>
+              <button class="lc-sub-tab" id="btnTabResult" onclick="switchLcSubTab('result')">▶ Test Result</button>
+            </div>
+            
+            <div id="lcTestcaseContent" class="lc-tab-content">
+              <label class="stdin-label" for="stdinInput2" style="margin-top: 6px;">Test Input (stdin):</label>
+              <textarea id="stdinInput2" class="stdin-editor" style="min-height: 70px;" placeholder="Enter custom test input here..."></textarea>
+            </div>
+
+            <div id="lcResultContent" class="lc-tab-content hidden">
+              <div id="codeOutput2" class="code-output" style="margin-top: 0; border-top: none; padding-top: 0;">
+                <div class="output-header" style="margin-bottom: 6px;">
+                  <span id="outputStatus2" class="output-status">Status: Ready</span>
+                  <span id="outputMeta2" class="output-meta"></span>
+                </div>
+                <pre id="outputStdout2" class="output-block" style="margin-bottom: 0; min-height: 70px;">You must run your code first.</pre>
+                <pre id="outputStderr2" class="output-block output-error hidden"></pre>
+              </div>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </main>
+
+  </div>
+</div>
+
+<script src="compiler.js"></script>
+</body>
+</html>

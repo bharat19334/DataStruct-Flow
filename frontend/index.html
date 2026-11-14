@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DSA Visual Tutor — learn algorithms by watching them run</title>
+<meta name="description" content="Paste any DSA question and get a plain-language explanation, a brute-force-to-optimal approach comparison, and a step-by-step animated dry run.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="theme.js"></script>
+</head>
+<body class="bg-grid">
+
+<header class="landing-nav">
+  <div class="brand">
+    <span class="brand-prompt">&gt;_</span>
+    <span class="brand-name">dsa<span class="brand-accent">.tutor</span></span>
+  </div>
+  <div class="landing-nav-links">
+    <button id="themeToggleBtn" class="btn-ghost" style="padding: 6px 12px; font-size: 12px; cursor: pointer;">🌙 Dark Mode</button>
+    <a href="#how-it-works" class="text-link">how it works</a>
+    <a href="#features" class="text-link">features</a>
+    <a href="compiler.html" class="btn-ghost">compiler</a>
+    <a href="dashboard.html" class="btn-solid">open dashboard →</a>
+  </div>
+</header>
+
+<main>
+
+  <!-- Hero Section with Split Layout & Time Complexity Graph -->
+  <section class="hero-split-section">
+    <div class="hero-left">
+      
+      <h1>Paste a DSA question.<br>Watch it get <span class="accent">solved</span> — step by step.</h1>
+      <p class="sub">No more memorizing solutions you don't understand. Get a plain-language explanation, compare every approach from brute force to optimal, then watch the algorithm actually run on a sample array.</p>
+      <div class="hero-ctas">
+        <a href="dashboard.html" class="btn-solid">start learning free →</a>
+        <a href="#how-it-works" class="btn-ghost">see how it works</a>
+      </div>
+    </div>
+
+    <!-- Right Side: Exact Time Complexity Graph (No Box Container) -->
+    <div class="hero-right">
+      <div class="complexity-graph-wrapper">
+        <svg viewBox="0 0 540 380" class="exact-complexity-svg">
+          <!-- Axes -->
+          <line x1="50" y1="330" x2="520" y2="330" stroke="#333" stroke-width="2.5"/>
+          <line x1="50" y1="30" x2="50" y2="330" stroke="#333" stroke-width="2.5"/>
+          
+          <!-- Axis Labels -->
+          <text x="235" y="372" fill="#111" font-size="14" font-weight="700" font-family="Inter, sans-serif">Input Size n -></text>
+          <text x="15" y="190" fill="#111" font-size="14" font-weight="700" font-family="Inter, sans-serif" transform="rotate(-90, 15, 190)" text-anchor="middle">Time Complexity -> </text>
+
+          <!-- 1. Constant - O(1) [Blue] -->
+          <line x1="50" y1="310" x2="500" y2="310" stroke="#0056b3" stroke-width="2.5"/>
+          <text x="508" y="314" fill="#0056b3" font-size="13" font-weight="700" font-family="Inter, sans-serif">Constant - O(1)</text>
+
+          <!-- 2. Logarithmic - O(log(n)) [Dark Green] -->
+          <path d="M 50 330 Q 180 320 490" fill="none" stroke="#1b5e20" stroke-width="2.5"/>
+          <path d="M 50 330 Q 200 320 500 270" fill="none" stroke="#1b5e20" stroke-width="2.5"/>
+          <text x="508" y="274" fill="#1b5e20" font-size="13" font-weight="700" font-family="Inter, sans-serif">Logarithmic - O(log(n))</text>
+
+          <!-- 3. Linear - O(n) [Yellow/Gold] -->
+          <line x1="50" y1="330" x2="440" y2="150" stroke="#d4ac0d" stroke-width="2.5"/>
+          <text x="448" y="154" fill="#d4ac0d" font-size="13" font-weight="700" font-family="Inter, sans-serif">Linear - O(n)</text>
+
+          <!-- 4. Log-Linear - O(n log n) [Orange] -->
+          <path d="M 50 330 Q 240 280 410" fill="none" stroke="#e67e22" stroke-width="2.5"/>
+          <path d="M 50 330 Q 240 280 410 110" fill="none" stroke="#e67e22" stroke-width="2.5"/>
+          <text x="418" y="114" fill="#e67e22" font-size="13" font-weight="700" font-family="Inter, sans-serif">Log-Linear - O(n log n)</text>
+
+          <!-- 5. Quadratic - O(n^2) [Red] -->
+          <path d="M 50 330 Q 260 290 340 70" fill="none" stroke="#d32f2f" stroke-width="2.5"/>
+          <text x="348" y="74" fill="#d32f2f" font-size="13" font-weight="700" font-family="Inter, sans-serif">Quadratic - O(n^2)</text>
+
+          <!-- 6. Polynomial - O(n^3)... [Slanted along curve] -->
+          <text x="185" y="205" fill="#222" font-size="12" font-weight="700" font-family="Inter, sans-serif" transform="rotate(-62, 185, 205)">Polynomial - O(n^3)...</text>
+
+          <!-- 7. Exponential - O(2^n) [Magenta] -->
+          <path d="M 50 330 Q 150 300 170 35" fill="none" stroke="#ff00ff" stroke-width="2.5"/>
+          <text x="178" y="42" fill="#b0003a" font-size="13" font-weight="700" font-family="Inter, sans-serif">Exponential - O(2^n)</text>
+
+          <!-- 8. Worse: O(n!) [Purple] -->
+          <path d="M 50 330 Q 90 300 105 35" fill="none" stroke="#6a1b9a" stroke-width="2.5"/>
+          <text x="65" y="22" fill="#6a1b9a" font-size="13" font-weight="700" font-family="Inter, sans-serif">Worse:</text>
+          <text x="65" y="38" fill="#6a1b9a" font-size="13" font-weight="700" font-family="Inter, sans-serif">O(n!)</text>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <div class="section-label">WHAT YOU GET</div>
+    <h2 class="section-title">Everything except the answer key</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="f-icon">01</div>
+        <h3>Plain-language explanations</h3>
+        <p>Every problem broken into what it's really asking, a real-world analogy, and the edge cases you'd miss otherwise.</p>
+      </div>
+      <div class="feature-card">
+        <div class="f-icon">02</div>
+        <h3>Approach comparison</h3>
+        <p>See brute force through optimal side by side — time complexity, space complexity, and the reasoning behind each.</p>
+      </div>
+      <div class="feature-card">
+        <div class="f-icon">03</div>
+        <h3>Step-by-step dry run</h3>
+        <p>Watch the array update, pointers move, and swaps happen — one step at a time, at whatever speed you choose.</p>
+      </div>
+      <div class="feature-card">
+        <div class="f-icon">04</div>
+        <h3>Voice narration</h3>
+        <p>Turn on narration and hear each step read aloud while you watch it animate — hands-free revision.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="how-it-works" id="how-it-works">
+    <div class="section-label">THE FLOW</div>
+    <h2 class="section-title">How it works</h2>
+    <div class="how-steps">
+      <div class="how-step">
+        <span class="how-step-num">01</span>
+        <div>
+          <h3>Paste your question</h3>
+          <p>Drop in any DSA problem — from an array question to a graph traversal. No formatting needed.</p>
+        </div>
+      </div>
+      <div class="how-step">
+        <span class="how-step-num">02</span>
+        <div>
+          <h3>Get the explanation</h3>
+          <p>A plain-language breakdown of what's being asked, with an analogy and the constraints to watch for.</p>
+        </div>
+      </div>
+      <div class="how-step">
+        <span class="how-step-num">03</span>
+        <div>
+          <h3>Compare approaches</h3>
+          <p>Two to four approaches, ordered brute force to optimal, each with complexity and the reasoning for why it is or isn't the best fit.</p>
+        </div>
+      </div>
+      <div class="how-step">
+        <span class="how-step-num">04</span>
+        <div>
+          <h3>Watch the dry run</h3>
+          <p>Pick an approach and watch it execute on a small sample — step forward, autoplay, or slow it down until it clicks.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta-band">
+    <h2>Stop memorizing. Start understanding.</h2>
+    <a href="dashboard.html" class="btn-solid">open dashboard →</a>
+  </section>
+
+</main>
+
+<footer class="landing-footer">
+  <div class="brand">
+    <span class="brand-prompt">&gt;_</span>
+    <span class="brand-name">dsa<span class="brand-accent">.tutor</span></span>
+  </div>
+  <span>Built by Bharat Goswami.</span>
+</footer>
+
+</body>
+</html>

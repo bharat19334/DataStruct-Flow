@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Practice Problems — DSA Visual Tutor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="theme.js"></script>
+</head>
+<body>
+
+<div class="app-shell">
+    <aside class="sidebar">
+    <a href="index.html" class="sidebar-brand brand" style="text-decoration:none;">
+      <span class="brand-prompt">&gt;_</span>
+      <span class="brand-name">dsa<span class="brand-accent">.tutor</span></span>
+    </a>
+    <nav class="sidebar-nav">
+      <a href="dashboard.html" class="sidebar-link"><span class="num">01</span> Dashboard</a>
+      <a href="practice.html" class="sidebar-link active"><span class="num">02</span> Practice</a>
+      <a href="progress.html" class="sidebar-link"><span class="num">03</span> Progress</a>
+      <a href="history.html" class="sidebar-link"><span class="num">04</span> History</a>
+      <a href="compiler.html" class="sidebar-link"><span class="num">05</span> Compiler</a>
+    </nav>
+  </aside>
+
+  <div class="app-main">
+    <!-- Top Header like screenshot -->
+    <header class="topbar practice-topbar">
+      <h1 class="practice-title">Practice Problems</h1>
+      <div class="practice-topbar-right">
+        <span class="solved-counter"><strong id="totalSolvedCount">0</strong> / <span id="totalQuestionsCount">0</span> Solved</span>
+        <button id="resetProgressBtn" class="btn-leaderboard" title="Reset progress">↻ Reset Progress</button>
+      </div>
+    </header>
+
+    <main class="wrap practice-wrap">
+      <!-- Horizontal Scrollable Topic Pills -->
+      <div class="topic-pills-bar" id="topicPillsBar"></div>
+
+      <!-- Subheader info -->
+      <div class="practice-subbar">
+        <span id="currentTopicLabel">All Problems</span>
+        <span id="currentPackCount">All: 5 Packs</span>
+      </div>
+
+      <!-- Cards List Container -->
+      <div id="practiceCardsContainer" class="practice-cards-list"></div>
+    </main>
+  </div>
+</div>
+
+<script src="practice.js"></script>
+</body>
+</html>
