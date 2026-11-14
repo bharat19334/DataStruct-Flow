@@ -1,6 +1,5 @@
 """
-DSA Visual Tutor - Backend (Production Ready)
-FastAPI + Groq powered API
+DSA Visual Tutor - Backend (Production Ready with Auto Model Discovery)
 """
 
 import os
@@ -22,16 +21,6 @@ load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
-# Primary aur Fallback models की list (agar ek deprecate ho toh dusra turant kaam karega)
- PRIMARY_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
-FALLBACK_MODELS = [
-    PRIMARY_MODEL,
-    "llama-3.1-8b-instant",
-    "gemma2-9b-it",
-    "mixtral-8x7b-32768",
-]
-
-# Render ke httpx compatibility bug se bachne ke liye custom http_client pass kiya hai
 client = None
 if GROQ_API_KEY:
     try:
@@ -48,7 +37,6 @@ LANGUAGE_MAP = {
 
 app = FastAPI(title="DSA Visual Tutor API")
 
-# Explicit CORS setup taaki browser 'Failed to fetch' na de
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -56,6 +44,47 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_ACTIVE_MODEL_CACHE: list = []
+
+
+def get_working_models() -> list:
+    """Groq API se live active chat models fetch karta hai taaki decommissioned error kabhi na aaye."""
+    global _ACTIVE_MODEL_CACHE
+    if _ACTIVE_MODEL_CACHE:
+        return _ACTIVE_MODEL_CACHE
+
+    preferred_order = [
+        "llama-3.1-8b-instant",
+        "llama3-8b-8192",
+        "llama3-70b-8192",
+        "gemma2-9b-it",
+        "mixtral-8x7b-32768",
+    ]
+
+    if client is None:
+        return preferred_order
+
+    try:
+        available = [m.id for m in client.models.list().data]
+        # Filter out audio/whisper/guard models
+        chat_models = [
+            m for m in available
+            if not any(bad in m.lower() for bad in ["whisper", "guard", "tts", "vision", "embed"])
+        ]
+        # Sort so preferred models come first if available, followed by any other live chat models
+        sorted_models = [m for m in preferred_order if m in chat_models]
+        for m in chat_models:
+            if m not in sorted_models:
+                sorted_models.append(m)
+
+        if sorted_models:
+            _ACTIVE_MODEL_CACHE = sorted_models
+            return _ACTIVE_MODEL_CACHE
+    except Exception:
+        pass
+
+    return preferred_order
 
 
 # ---------- Request Models ----------
@@ -84,40 +113,35 @@ class TranslateRequest(BaseModel):
 
 # ---------- Helper: Fault-Tolerant Groq Caller ----------
 
-def call_llm(system_prompt: str, user_prompt: str, json_mode: bool = False) -> str:
+def call_llm(system_prompt: str, user_prompt: str) -> str:
     if client is None:
         raise HTTPException(
             status_code=500,
-            detail="GROQ_API_KEY is missing on server. Add it in Render -> Environment."
+            detail="GROQ_API_KEY not set on Render Environment."
         )
 
+    models_to_try = get_working_models()
     last_error = None
-    # Har model ko try karega jab tak success na mile
-    for model_name in FALLBACK_MODELS:
+
+    for model_name in models_to_try:
         try:
-            kwargs = {
-                "model": model_name,
-                "messages": [
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                "temperature": 0.3,
-            }
-            if json_mode:
-                kwargs["response_format"] = {"type": "json_object"}
-
-            response = client.chat.completions.create(**kwargs)
+                temperature=0.3,
+            )
             return response.choices[0].message.content
         except Exception as e:
             last_error = str(e)
             continue
 
-    # Agar saare models fail ho jayein (jaise Invalid API key), toh clean HTTPException dega (CORS break nahi hoga)
     raise HTTPException(status_code=502, detail=f"Groq API Error: {last_error}")
 
 
 def extract_json(raw_text: str):
-    """Clean markdown fences and extract valid JSON."""
     cleaned = re.sub(r"```json|```", "", raw_text).strip()
     match = re.search(r"(\{.*\}|\[.*\])", cleaned, re.DOTALL)
     if match:
@@ -132,7 +156,7 @@ def health():
     return {
         "status": "ok",
         "api_key_configured": bool(GROQ_API_KEY),
-        "primary_model": PRIMARY_MODEL
+        "available_models": get_working_models()[:5],
     }
 
 
@@ -171,7 +195,6 @@ def get_approaches(req: QuestionRequest):
     raw = call_llm(system_prompt, req.question)
     try:
         parsed = extract_json(raw)
-        # Handle case if LLM wraps array inside an object key like {"approaches": [...]}
         if isinstance(parsed, dict) and "approaches" in parsed:
             approaches = parsed["approaches"]
         else:
@@ -233,7 +256,7 @@ def dry_run(req: DryRunRequest):
         f"{action_language_instruction}"
     )
     user_prompt = f"Problem: {req.question}\nApproach to simulate: {req.approach}"
-    raw = call_llm(system_prompt, user_prompt, json_mode=True)
+    raw = call_llm(system_prompt, user_prompt)
     try:
         trace = extract_json(raw)
     except Exception:
@@ -270,13 +293,12 @@ async def run_code(req: RunCodeRequest):
             temp_file_name = f.name
 
         try:
-            # sys.executable ensures exact Python binary on both Windows & Linux (Render)
             process = subprocess.run(
                 [sys.executable, temp_file_name],
                 input=req.stdin or "",
                 text=True,
                 capture_output=True,
-                timeout=5
+                timeout=5,
             )
             os.unlink(temp_file_name)
             return {
@@ -285,7 +307,7 @@ async def run_code(req: RunCodeRequest):
                 "compile_output": "",
                 "exit_code": process.returncode,
                 "language": "python",
-                "version": "3.x"
+                "version": "3.x",
             }
         except subprocess.TimeoutExpired:
             if os.path.exists(temp_file_name):
@@ -296,7 +318,7 @@ async def run_code(req: RunCodeRequest):
                 "compile_output": "",
                 "exit_code": -1,
                 "language": "python",
-                "version": "3.x"
+                "version": "3.x",
             }
         except Exception as e:
             if os.path.exists(temp_file_name):
@@ -307,7 +329,7 @@ async def run_code(req: RunCodeRequest):
                 "compile_output": "",
                 "exit_code": -1,
                 "language": "python",
-                "version": "3.x"
+                "version": "3.x",
             }
 
     return {
@@ -316,7 +338,7 @@ async def run_code(req: RunCodeRequest):
         "compile_output": "",
         "exit_code": 0,
         "language": language_id,
-        "version": "latest"
+        "version": "latest",
     }
 
 
