@@ -1,4 +1,7 @@
-const API_BASE ="https://datastruct-flow-backend.onrender.com"; // <-- replace after deploying backend on Render
+const API_BASE =
+  window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+    ? "http://localhost:8000"
+    : "https://datastruct-flow-backend.onrender.com"; // <-- replace after deploying backend on Render
 
 const tabLogin = document.getElementById("tabLogin");
 const tabSignup = document.getElementById("tabSignup");
