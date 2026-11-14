@@ -27,15 +27,6 @@ load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
-# Active Groq models (Hardcoded priority list so old Render env vars cannot break it)
-MODEL_NAME = "llama-3.1-8b-instant"
-FALLBACK_MODELS = [
-    "llama-3.1-8b-instant",
-    "llama3-8b-8192",
-    "gemma2-9b-it",
-    "mixtral-8x7b-32768",
-]
-
 # Initialize Groq client safely for Render Python environment
 client = None
 if GROQ_API_KEY:
@@ -58,6 +49,7 @@ FILE_EXTENSIONS = {
     "javascript": "main.js",
 }
 _piston_runtime_cache: dict = {}
+_WORKING_MODEL: Optional[str] = None
 
 app = FastAPI(title="DSA Visual Tutor API")
 
@@ -93,17 +85,62 @@ class TranslateRequest(BaseModel):
     target: str = "english"  # "english", "hinglish", or "hindi"
 
 
-# ---------- Helper: call Groq & force clean JSON ----------
+# ---------- Helper: Dynamic Model Discovery & Groq Caller ----------
+
+def get_live_models() -> list:
+    """Groq API se live models ki list nikalta hai taaki decommissioned error kabhi na aaye."""
+    live_models = []
+    if client is not None:
+        try:
+            models_resp = client.models.list()
+            for m in models_resp.data:
+                m_id = m.id
+                # Audio, whisper, guard aur embedding models ko skip karein
+                if any(skip in m_id.lower() for skip in ["whisper", "guard", "tts", "embed", " playai", "allam"]):
+                    continue
+                live_models.append(m_id)
+        except Exception:
+            pass
+
+    # Priority order: Llama / Qwen / DeepSeek / Gemma models ko sabse aage rakhein
+    preferred_keywords = ["llama-4", "llama-3.3", "llama-3.1", "qwen", "deepseek", "gemma", "llama"]
+    sorted_models = sorted(
+        live_models,
+        key=lambda x: next((i for i, kw in enumerate(preferred_keywords) if kw in x.lower()), 999)
+    )
+
+    # Backup list agar list() call fail ho
+    backups = [
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "qwen-qwq-32b",
+        "deepseek-r1-distill-llama-70b",
+    ]
+    for b in backups:
+        if b not in sorted_models:
+            sorted_models.append(b)
+
+    return sorted_models
+
 
 def call_llm(system_prompt: str, user_prompt: str) -> str:
+    global _WORKING_MODEL
     if client is None:
         raise HTTPException(
             status_code=500,
             detail="GROQ_API_KEY not set. Add it to Render Environment Variables."
         )
 
-    last_error = None
-    for model_to_use in FALLBACK_MODELS:
+    # Agar pehle se ek working model mil chuka hai, toh sabse pehle usi ko try karein
+    models_to_try = get_live_models()
+    if _WORKING_MODEL and _WORKING_MODEL in models_to_try:
+        models_to_try.remove(_WORKING_MODEL)
+        models_to_try.insert(0, _WORKING_MODEL)
+
+    errors = []
+    for model_to_use in models_to_try:
         try:
             response = client.chat.completions.create(
                 model=model_to_use,
@@ -113,17 +150,22 @@ def call_llm(system_prompt: str, user_prompt: str) -> str:
                 ],
                 temperature=0.3,
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            # DeepSeek R1 jaise models <think>...</think> tags add karte hain, unhe strip karein
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            _WORKING_MODEL = model_to_use
+            return content
         except Exception as e:
-            last_error = str(e)
+            errors.append(f"{model_to_use}: {str(e)}")
             continue
 
-    raise HTTPException(status_code=502, detail=f"Groq API error: {last_error}")
+    raise HTTPException(status_code=502, detail=f"Groq API error: {errors[0] if errors else 'No working models found'}")
 
 
 def extract_json(raw_text: str):
     """LLMs sometimes wrap JSON in ```json fences or add stray text. Strip it."""
-    cleaned = re.sub(r"```json|```", "", raw_text).strip()
+    cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
+    cleaned = re.sub(r"```json|```", "", cleaned).strip()
     match = re.search(r"(\{.*\}|\[.*\])", cleaned, re.DOTALL)
     if match:
         cleaned = match.group(1)
@@ -136,7 +178,8 @@ def extract_json(raw_text: str):
 def health():
     return {
         "status": "ok",
-        "model": MODEL_NAME,
+        "active_model": _WORKING_MODEL,
+        "detected_live_models": get_live_models()[:8],
         "api_key_present": bool(GROQ_API_KEY)
     }
 
@@ -310,7 +353,6 @@ async def get_piston_version(language_id: str) -> str:
 async def run_code(req: RunCodeRequest):
     language_id = LANGUAGE_MAP.get(req.language, "python")
 
-    # Python local safe execution (using sys.executable so it works on both Windows & Render Linux)
     if language_id == "python":
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
             f.write(req.code)
