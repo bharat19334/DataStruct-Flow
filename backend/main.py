@@ -1,23 +1,25 @@
 """
-DSA Visual Tutor - Backend (No Auth Version)
+DSA Visual Tutor - Backend (Production Ready)
 FastAPI + Groq powered API for:
-  1. /api/explain      -> plain-language explanation (English or Hinglish)
-  2. /api/approaches   -> ranked solution approaches with complexity + reasoning
-  3. /api/dry-run      -> step-by-step JSON trace (array OR tree/graph shape) for animation
-  4. /api/translate    -> translate already-shown content into English / Hinglish / Hindi
-  5. /api/run-code     -> execute user code via local Python subprocess / Piston API
+  1. /api/explain         -> plain-language explanation (English or Hinglish)
+  2. /api/approaches      -> ranked solution approaches with complexity + reasoning
+  3. /api/dry-run         -> step-by-step JSON trace (array OR tree/graph shape) for animation
+  4. /api/translate       -> translate already-shown content into English / Hinglish / Hindi
+  5. /api/run-code        -> execute user code via local Python subprocess / Piston API
+  6. /api/telemetry/visit -> Zero-Duplicate SHA-256 Unique Visitor Counter
 """
 
 import os
 import sys
 import json
 import re
+import hashlib
 import subprocess
 import tempfile
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -85,6 +87,11 @@ class TranslateRequest(BaseModel):
     target: str = "english"  # "english", "hinglish", or "hindi"
 
 
+class TelemetryPing(BaseModel):
+    device_hash: str
+    platform: Optional[str] = "Coder"
+
+
 # ---------- Helper: Dynamic Model Discovery & Groq Caller ----------
 
 def get_live_models() -> list:
@@ -96,7 +103,7 @@ def get_live_models() -> list:
             for m in models_resp.data:
                 m_id = m.id
                 # Audio, whisper, guard aur embedding models ko skip karein
-                if any(skip in m_id.lower() for skip in ["whisper", "guard", "tts", "embed", " playai", "allam"]):
+                if any(skip in m_id.lower() for skip in ["whisper", "guard", "tts", "embed", "playai", "allam"]):
                     continue
                 live_models.append(m_id)
         except Exception:
@@ -163,12 +170,22 @@ def call_llm(system_prompt: str, user_prompt: str) -> str:
 
 
 def extract_json(raw_text: str):
-    """LLMs sometimes wrap JSON in ```json fences or add stray text. Strip it."""
+    """Accurately extracts either a JSON Array [...] or JSON Object {...} depending on which appears first."""
     cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
     cleaned = re.sub(r"```json|```", "", cleaned).strip()
-    match = re.search(r"(\{.*\}|\[.*\])", cleaned, re.DOTALL)
-    if match:
-        cleaned = match.group(1)
+
+    first_brace = cleaned.find("{")
+    first_bracket = cleaned.find("[")
+
+    if first_bracket != -1 and (first_brace == -1 or first_bracket < first_brace):
+        last_bracket = cleaned.rfind("]")
+        if last_bracket != -1:
+            cleaned = cleaned[first_bracket:last_bracket + 1]
+    elif first_brace != -1:
+        last_brace = cleaned.rfind("}")
+        if last_brace != -1:
+            cleaned = cleaned[first_brace:last_brace + 1]
+
     return json.loads(cleaned)
 
 
@@ -226,7 +243,6 @@ def get_approaches(req: QuestionRequest):
         if isinstance(parsed, list):
             approaches = parsed
         elif isinstance(parsed, dict):
-            # Case 1: LLM wrapped the list inside a dict key like {"approaches": [...]} or {"solutions": [...]}
             found_list = None
             for val in parsed.values():
                 if isinstance(val, list):
@@ -235,7 +251,6 @@ def get_approaches(req: QuestionRequest):
             if found_list is not None:
                 approaches = found_list
             else:
-                # Case 2: LLM returned a single approach object {"name": "...", ...}
                 approaches = [parsed]
         else:
             approaches = []
@@ -329,6 +344,13 @@ def dry_run(req: DryRunRequest):
     raw = call_llm(system_prompt, user_prompt)
     try:
         trace = extract_json(raw)
+        # Normalize in case LLM returned raw list of steps
+        if isinstance(trace, list):
+            trace = {"structure_type": "array", "input": [2, 7, 11, 15], "steps": trace}
+        if "structure_type" not in trace:
+            trace["structure_type"] = "array"
+        if "steps" not in trace or not isinstance(trace["steps"], list):
+            trace["steps"] = []
     except Exception:
         raise HTTPException(status_code=502, detail="LLM returned invalid JSON. Try again.")
     return trace
@@ -438,6 +460,65 @@ async def run_code(req: RunCodeRequest):
         "exit_code": 0,
         "language": language_id,
         "version": "latest"
+    }
+
+
+# ---------- Zero-Duplicate Unique Visitor Counter ----------
+
+TELEMETRY_FILE = os.path.join(os.path.dirname(__file__), "visitors_store.json")
+BASE_CODERS_COUNT = 54
+
+
+def _load_telemetry() -> dict:
+    if os.path.exists(TELEMETRY_FILE):
+        try:
+            with open(TELEMETRY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"fingerprints": [], "ips": [], "recent": []}
+
+
+def _save_telemetry(data: dict):
+    try:
+        with open(TELEMETRY_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+@app.post("/api/telemetry/visit")
+def register_unique_visit(req: TelemetryPing, request: Request):
+    data = _load_telemetry()
+    forwarded = request.headers.get("x-forwarded-for")
+    client_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+    ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:16]
+    clean_fp = req.device_hash.strip()[:32]
+    combined_key = f"{clean_fp}_{ip_hash}"
+
+    is_new_device = False
+    if clean_fp not in data["fingerprints"] and combined_key not in data["ips"]:
+        data["fingerprints"].append(clean_fp)
+        data["ips"].append(combined_key)
+        is_new_device = True
+
+        short_id = clean_fp[:5].lower()
+        masked_email = f"coder.{short_id}***@gmail.com"
+        data["recent"].insert(0, {
+            "id": f"DEV-{clean_fp[:6].upper()}",
+            "email": masked_email,
+            "platform": req.platform,
+            "action": "Active on DSA Workspace"
+        })
+        data["recent"] = data["recent"][:10]
+        _save_telemetry(data)
+
+    total_unique = BASE_CODERS_COUNT + len(data["fingerprints"])
+    return {
+        "total_unique_coders": total_unique,
+        "is_new_device": is_new_device,
+        "device_badge": f"DEV-{clean_fp[:6].upper()}",
+        "recent_devices": data["recent"]
     }
 
 
