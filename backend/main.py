@@ -211,21 +211,54 @@ def explain_question(req: QuestionRequest):
 @app.post("/api/approaches")
 def get_approaches(req: QuestionRequest):
     system_prompt = (
-        "You are a DSA tutor. Given a problem, return ONLY valid JSON (no markdown, "
-        "no commentary) — an array of approach objects, ordered from brute force to "
-        "most optimal. Each object must have exactly these keys: "
+        "You are a DSA tutor. Given a problem or topic, return ONLY a valid JSON array "
+        "(no markdown, no commentary) of 2 to 4 approach objects ordered from brute force "
+        "to most optimal. Each object must have EXACTLY these keys: "
         '"name" (string), "time_complexity" (string), "space_complexity" (string), '
-        '"is_best" (boolean), "why" (1-2 sentence reasoning for why this is/isn\'t optimal). '
-        "Include 2 to 4 approaches."
+        '"is_best" (boolean), "why" (1-2 sentence reasoning). '
+        "IMPORTANT: Your output MUST start with '[' and end with ']'."
     )
     raw = call_llm(system_prompt, req.question)
     try:
-        approaches = extract_json(raw)
-        if isinstance(approaches, dict) and "approaches" in approaches:
-            approaches = approaches["approaches"]
+        parsed = extract_json(raw)
+
+        # SMART ARRAY NORMALIZER: Guarantees 'approaches' is ALWAYS a list [...]
+        if isinstance(parsed, list):
+            approaches = parsed
+        elif isinstance(parsed, dict):
+            # Case 1: LLM wrapped the list inside a dict key like {"approaches": [...]} or {"solutions": [...]}
+            found_list = None
+            for val in parsed.values():
+                if isinstance(val, list):
+                    found_list = val
+                    break
+            if found_list is not None:
+                approaches = found_list
+            else:
+                # Case 2: LLM returned a single approach object {"name": "...", ...}
+                approaches = [parsed]
+        else:
+            approaches = []
+
+        # Ensure every item inside the list has required keys so frontend never crashes
+        clean_approaches = []
+        for idx, item in enumerate(approaches):
+            if isinstance(item, dict):
+                clean_approaches.append({
+                    "name": str(item.get("name", f"Approach {idx + 1}")),
+                    "time_complexity": str(item.get("time_complexity", "O(n)")),
+                    "space_complexity": str(item.get("space_complexity", "O(1)")),
+                    "is_best": bool(item.get("is_best", idx == len(approaches) - 1)),
+                    "why": str(item.get("why", "Standard approach for this problem."))
+                })
+
+        if not clean_approaches:
+            raise ValueError("Empty approaches list")
+
     except Exception:
         raise HTTPException(status_code=502, detail="LLM returned invalid JSON. Try again.")
-    return {"approaches": approaches}
+
+    return {"approaches": clean_approaches}
 
 
 @app.post("/api/dry-run")
