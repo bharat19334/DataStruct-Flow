@@ -167,5 +167,13 @@
   <span>Built by Bharat Goswami.</span>
 </footer>
 
+<script>
+  // Entering the dashboard from the landing page => ask the visitor's name again
+  document.querySelectorAll('a[href="dashboard.html"]').forEach(function (a) {
+    a.addEventListener("click", function () {
+      try { sessionStorage.setItem("dsa_ask_name", "1"); } catch (e) {}
+    });
+  });
+</script>
 </body>
 </html>

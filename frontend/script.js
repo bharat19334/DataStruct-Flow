@@ -217,7 +217,7 @@ async function runTutor() {
   showLoader("understanding & comparing approaches...");
 
   try {
-    const explainPromise = callApi("/api/explain", { question }).then((explainRes) => {
+    const explainPromise = callApi("/api/explain", { question, user_name: getFirstName() }).then((explainRes) => {
       explanationText.textContent = explainRes.explanation;
       resetTranslationState(explainRes.explanation);
       explainPanel.classList.remove("hidden");
