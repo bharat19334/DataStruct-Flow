@@ -68,6 +68,7 @@ app.add_middleware(
 class QuestionRequest(BaseModel):
     question: str
     explain_language: Optional[str] = "english"  # "english" or "hinglish"
+    user_name: Optional[str] = None  # student's first name, used to address them as "<Name> ji"
 
 
 class DryRunRequest(BaseModel):
@@ -214,10 +215,24 @@ def explain_question(req: QuestionRequest):
     else:
         language_instruction = "Respond in clear, simple English."
 
+    # Sanitise the name (letters only, first word) so it can't be used to inject instructions
+    first_name = ""
+    if req.user_name:
+        parts = re.sub(r"[^\w\s]|\d|_", "", req.user_name).split()
+        if parts:
+            first_name = parts[0][:20].capitalize()
+    name_instruction = (
+        f"The student's name is {first_name}. Start the explanation by addressing them as "
+        f"'{first_name} ji' (first name followed by 'ji'), and use '{first_name} ji' once more "
+        "naturally later in the explanation. "
+        if first_name else ""
+    )
+
     system_prompt = (
         "You are a friendly DSA tutor for Indian CS students preparing for placements. "
         "Explain the given problem in simple language: what it's asking, a real-world "
         "analogy, and constraints/edge cases to watch for. Keep it under 150 words. "
+        f"{name_instruction}"
         f"{language_instruction} "
         "Respond in plain text, no markdown headers."
     )
