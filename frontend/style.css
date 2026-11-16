@@ -7,6 +7,7 @@
   --bg: #F7F2E7;              /* Portfolio background */
   --bg-soft: #F1ECDF;
   --grid-line: #E8E6DA;       /* Portfolio grid line colour */
+  --grid-line-minor: #F1ECDF;  /* very light sub-grid, lighter than main border */
   --panel: rgba(255, 255, 255, 0.94);
   --panel-border: #E2DDD0;
   --text: #141815;
@@ -32,6 +33,7 @@ body.dark,
   --bg: #111512;
   --bg-soft: #171C18;
   --grid-line: rgba(255, 255, 255, 0.045);
+  --grid-line-minor: rgba(255, 255, 255, 0.015);
   --panel: rgba(24, 30, 26, 0.95);
   --panel-border: #2A342D;
   --text: #F2F0E8;
@@ -68,10 +70,13 @@ html, body {
 body {
   background-color: var(--bg);
   /* Portfolio-style 50px architectural grid pattern */
+  /* Major 50px boxes + 25px sub-grid (2x2 small cells inside each box) */
   background-image:
     linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
-  background-size: 50px 50px;
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to right, var(--grid-line-minor) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line-minor) 1px, transparent 1px);
+  background-size: 50px 50px, 50px 50px, 25px 25px, 25px 25px;
   background-attachment: fixed;
   color: var(--text);
   font-family: var(--sans);
