@@ -8,8 +8,127 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <script src="theme.js"></script>
+<style>
+  .history-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .history-filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .filter-btn {
+    background: var(--bar);
+    border: 1px solid var(--panel-border);
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 7px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+  .filter-btn.active {
+    background: var(--accent);
+    color: #06201c;
+    border-color: var(--accent);
+    font-weight: 700;
+  }
+  .history-search {
+    background: var(--bar);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    min-width: 240px;
+  }
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .history-card {
+    background: var(--bar);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .history-card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+  .history-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .badge-question { background: rgba(0, 229, 191, 0.15); color: var(--accent); }
+  .badge-solved { background: rgba(46, 204, 113, 0.2); color: #2ecc71; }
+  .badge-dryrun { background: rgba(52, 152, 219, 0.2); color: #3498db; }
+  .history-time {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .history-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.4;
+  }
+  .history-meta {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .history-code-preview {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--panel-border);
+    padding: 10px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    max-height: 120px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+  }
+  .history-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 4px;
+  }
+  .btn-hist-action {
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    padding: 5px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .btn-hist-action:hover {
+    border-color: var(--accent);
+  }
+</style>
 </head>
-<body>
+<body class="bg-grid">
 
 <div class="app-shell">
   <aside class="sidebar">
@@ -19,28 +138,161 @@
     </a>
     <nav class="sidebar-nav">
       <a href="dashboard.html" class="sidebar-link"><span class="num">01</span> Dashboard</a>
-      <a href="practice.html" class="sidebar-link"><span class="num">02</span> Practice <span class="soon"></span></a>
-      <a href="progress.html" class="sidebar-link"><span class="num">03</span> Progress <span class="soon"></span></a>
-      <a href="history.html" class="sidebar-link active"><span class="num">04</span> History <span class="soon">Soon</span></a>
+      <a href="practice.html" class="sidebar-link"><span class="num">02</span> Practice</a>
+      <a href="progress.html" class="sidebar-link"><span class="num">03</span> Progress</a>
+      <a href="history.html" class="sidebar-link active"><span class="num">04</span> History</a>
       <a href="compiler.html" class="sidebar-link"><span class="num">05</span> Compiler</a>
     </nav>
   </aside>
 
   <div class="app-main">
     <header class="topbar topbar-slim">
-      <div class="topbar-status"><span class="dot dot-idle"></span> history</div>
+      <div class="topbar-status">
+        <span class="dot dot-live"></span>
+        <span id="syncStatusText">history synced with supabase</span>
+      </div>
     </header>
 
     <main class="wrap">
-      <section class="panel coming-soon">
-        <div class="cs-icon">◆</div>
-        <h2>Question history is on its way</h2>
-        <p>Every question you've asked and every dry run you've watched, saved and searchable — coming in the next update.</p>
+      <section class="panel">
+        <div class="panel-label">04 — ACTIVITY &amp; SOLVED HISTORY</div>
+
+        <div class="history-header-row">
+          <div class="history-filters">
+            <button class="filter-btn active" data-filter="all">All Activity</button>
+            <button class="filter-btn" data-filter="question">Asked Questions</button>
+            <button class="filter-btn" data-filter="solved">Solved Problems</button>
+            <button class="filter-btn" data-filter="dryrun">Dry Runs</button>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <input type="text" id="historySearch" class="history-search" placeholder="Search questions or code...">
+            <button id="clearHistoryBtn" class="filter-btn" style="color:#ff6b6b;">Clear</button>
+          </div>
+        </div>
+
+        <div id="historyList" class="history-list">
+          <div class="action-line">Loading your history from Supabase...</div>
+        </div>
       </section>
     </main>
   </div>
 </div>
 
-<script src="stub.js"></script>
+<script src="history-store.js"></script>
+<script>
+  const historyListEl = document.getElementById("historyList");
+  const searchInput = document.getElementById("historySearch");
+  const filterBtns = document.querySelectorAll(".filter-btn[data-filter]");
+  const clearBtn = document.getElementById("clearHistoryBtn");
+
+  let allItems = getHistory();
+  let currentFilter = "all";
+
+  function formatTime(ts) {
+    const d = new Date(ts);
+    return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " • " +
+           d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  function escapeHtml(str) {
+    return String(str || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function renderList() {
+    const query = (searchInput.value || "").trim().toLowerCase();
+    const filtered = allItems.filter((item) => {
+      const matchesTab = currentFilter === "all" || item.type === currentFilter;
+      const matchesQuery =
+        !query ||
+        (item.text && item.text.toLowerCase().includes(query)) ||
+        (item.approach && item.approach.toLowerCase().includes(query)) ||
+        (item.code && item.code.toLowerCase().includes(query));
+      return matchesTab && matchesQuery;
+    });
+
+    if (filtered.length === 0) {
+      historyListEl.innerHTML = `
+        <div class="coming-soon" style="padding: 40px 20px;">
+          <div class="cs-icon">◆</div>
+          <h2>No history items found</h2>
+          <p>Ask a question in the Dashboard or solve a problem in the Compiler — everything will automatically appear here and sync to Supabase.</p>
+        </div>`;
+      return;
+    }
+
+    historyListEl.innerHTML = filtered.map((item, idx) => {
+      let badgeClass = "badge-question";
+      let badgeText = "Asked Question";
+      if (item.type === "solved") {
+        badgeClass = "badge-solved";
+        badgeText = `Solved (${item.language || "Code"})`;
+      } else if (item.type === "dryrun") {
+        badgeClass = "badge-dryrun";
+        badgeText = "Dry Run Watched";
+      }
+
+      return `
+        <div class="history-card">
+          <div class="history-card-top">
+            <span class="history-badge ${badgeClass}">${escapeHtml(badgeText)}</span>
+            <span class="history-time">${formatTime(item.time)}</span>
+          </div>
+          <div class="history-title">${escapeHtml(item.text)}</div>
+          ${item.approach ? `<div class="history-meta">Approach: <strong>${escapeHtml(item.approach)}</strong></div>` : ""}
+          ${item.code ? `<pre class="history-code-preview">${escapeHtml(item.code)}</pre>` : ""}
+          <div class="history-actions">
+            <button class="btn-hist-action" onclick="reopenDashboard(${idx})">↗ Ask in Dashboard</button>
+            <button class="btn-hist-action" onclick="reopenCompiler(${idx})">💻 Open in Compiler</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  window.reopenDashboard = function(idx) {
+    const item = allItems[idx];
+    if (!item) return;
+    localStorage.setItem("dsa_prefill_question", item.text);
+    window.location.href = "dashboard.html";
+  };
+
+  window.reopenCompiler = function(idx) {
+    const item = allItems[idx];
+    if (!item) return;
+    localStorage.setItem("dsa_compiler_question", item.text);
+    if (item.code) localStorage.setItem("dsa_compiler_saved_code", item.code);
+    window.location.href = "compiler.html";
+  };
+
+  filterBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      filterBtns.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentFilter = btn.dataset.filter;
+      renderList();
+    });
+  });
+
+  searchInput.addEventListener("input", renderList);
+
+  clearBtn.addEventListener("click", async () => {
+    if (!confirm("Clear your entire history from browser and Supabase?")) return;
+    localStorage.removeItem(HISTORY_KEY);
+    allItems = [];
+    renderList();
+    const uid = encodeURIComponent(getUserIdentifier());
+    await fetch(`${HISTORY_API_BASE}/api/history?user_identifier=${uid}`, { method: "DELETE" }).catch(() => {});
+  });
+
+  // Render local cache immediately (0ms), then merge Supabase cloud data
+  renderList();
+  fetchSupabaseHistory().then((cloudItems) => {
+    allItems = cloudItems;
+    renderList();
+  });
+</script>
 </body>
 </html>

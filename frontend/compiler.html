@@ -40,8 +40,7 @@
       <div class="topbar-status"><span class="dot dot-live"></span> <span id="compilerHeaderMode">compiler workspace</span></div>
     </header>
 
-    <!-- 1. STANDARD COMPILER VIEW -->
-<!-- 1. STANDARD COMPILER VIEW (2 Columns with Resizer) -->
+    <!-- 1. STANDARD COMPILER VIEW (2 Columns with Resizer) -->
     <main class="wrap" id="standardCompilerWrap">
       <div class="compiler-resizer-container" id="compilerResizerContainer">
         
@@ -60,7 +59,7 @@
 
           <div class="stdin-row">
             <label class="stdin-label" for="stdinInput">stdin (optional input)</label>
-            <textarea id="stdinInput" class="stdin-editor" spellcheck="false" placeholder="input values here..."></textarea>
+            <textarea id="stdinInput" class="stdin-editor" style="min-height: 70px;" spellcheck="false" placeholder="input values here..."></textarea>
           </div>
 
           <button id="runCodeBtn" class="btn-run">
@@ -166,6 +165,7 @@
   </div>
 </div>
 
+<script src="history-store.js"></script>
 <script src="compiler.js"></script>
 </body>
 </html>

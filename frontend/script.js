@@ -1,5 +1,29 @@
-// Direct local backend URL (works whether opened via Live Server, localhost, or file://)
-const API_BASE = "https://datastruct-flow-backend.onrender.com";
+const API_BASE =
+  window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+    ? "http://localhost:8000"
+    : "https://datastruct-flow-backend.onrender.com";
+
+// Wake up Render server immediately on page load to eliminate cold start delay
+fetch(`${API_BASE}/`).catch(() => {});
+
+const FAST_CACHE_KEY = "dsa_fast_cache_v1";
+
+function getFastCache(key) {
+  try {
+    const store = JSON.parse(sessionStorage.getItem(FAST_CACHE_KEY) || "{}");
+    return store[key.trim().toLowerCase()] || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function setFastCache(key, data) {
+  try {
+    const store = JSON.parse(sessionStorage.getItem(FAST_CACHE_KEY) || "{}");
+    store[key.trim().toLowerCase()] = data;
+    sessionStorage.setItem(FAST_CACHE_KEY, JSON.stringify(store));
+  } catch (e) {}
+}
 
 const questionInput = document.getElementById("questionInput");
 const runBtn = document.getElementById("runBtn");
@@ -202,34 +226,69 @@ questionInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.ctrlKey) runTutor();
 });
 
-// FAST PARALLEL EXECUTION: Explain aur Approaches dono ek saath run honge
+// TURBO EXECUTION: Save to History + Check Browser Cache + Parallel Backend Execution
 async function runTutor() {
   const question = questionInput.value.trim();
   if (!question) return;
   currentQuestion = question;
 
+  // 1. Save Asked Question to History & Supabase immediately
+  if (typeof addHistory === "function") {
+    addHistory({
+      type: "question",
+      text: question,
+      status: "Asked in Dashboard",
+    });
+  }
+
   hideError();
   stopSpeaking();
+  dryrunPanel.classList.add("hidden");
+
+  // 2. Check Instant Browser Cache first (0ms response if already asked)
+  const cachedData = getFastCache("q:" + question);
+  if (cachedData && cachedData.explanation && cachedData.approaches) {
+    explanationText.textContent = cachedData.explanation;
+    resetTranslationState(cachedData.explanation);
+    explainPanel.classList.remove("hidden");
+    renderApproaches(cachedData.approaches);
+    approachesPanel.classList.remove("hidden");
+    setStatus(false, "loaded instantly from cache");
+    return;
+  }
+
   explainPanel.classList.add("hidden");
   approachesPanel.classList.add("hidden");
-  dryrunPanel.classList.add("hidden");
   setStatus(true, "thinking...");
   showLoader("understanding & comparing approaches...");
 
   try {
-    const explainPromise = callApi("/api/explain", { question, user_name: getFirstName() }).then((explainRes) => {
+    let savedExp = "";
+    let savedApp = [];
+
+    const explainPromise = callApi("/api/explain", {
+      question,
+      user_name: typeof getFirstName === "function" ? getFirstName() : "",
+    }).then((explainRes) => {
+      savedExp = explainRes.explanation;
       explanationText.textContent = explainRes.explanation;
       resetTranslationState(explainRes.explanation);
+      // Also store explanation in localStorage so Compiler page can reuse it without re-fetching
+      try {
+        localStorage.setItem("dsa_last_explanation_" + question.trim().toLowerCase(), explainRes.explanation);
+      } catch (e) {}
       explainPanel.classList.remove("hidden");
     });
 
     const approachesPromise = callApi("/api/approaches", { question }).then((approachRes) => {
+      savedApp = approachRes.approaches;
       renderApproaches(approachRes.approaches);
       approachesPanel.classList.remove("hidden");
     });
 
     await Promise.all([explainPromise, approachesPromise]);
 
+    setFastCache("q:" + question, { explanation: savedExp, approaches: savedApp });
     hideLoader();
     setStatus(false, "pick an approach to dry-run");
   } catch (err) {
@@ -263,14 +322,41 @@ async function runDryRun(approachName) {
   hideError();
   stopAutoplay();
   stopSpeaking();
+
+  // Save Dry Run activity to History & Supabase
+  if (typeof addHistory === "function") {
+    addHistory({
+      type: "dryrun",
+      text: currentQuestion,
+      approach: approachName,
+      status: "Visualized Dry Run",
+    });
+  }
+
+  const lang = narrateLangSelect ? narrateLangSelect.value : "english";
+  const cacheKey = `dr:${currentQuestion}|${approachName}|${lang}`;
+  const cachedTrace = getFastCache(cacheKey);
+
+  if (cachedTrace) {
+    currentSteps = cachedTrace.steps || [];
+    currentStepIndex = 0;
+    dryrunApproachName.textContent = approachName;
+    dryrunPanel.classList.remove("hidden");
+    renderStep();
+    dryrunPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    setStatus(false, "dry run ready (cached)");
+    return;
+  }
+
   setStatus(true, "building dry run...");
   showLoader("simulating step-by-step trace...");
   try {
     const trace = await callApi("/api/dry-run", {
       question: currentQuestion,
       approach: approachName,
-      narrate_language: narrateLangSelect ? narrateLangSelect.value : "english",
+      narrate_language: lang,
     });
+    setFastCache(cacheKey, trace);
     currentSteps = trace.steps || [];
     currentStepIndex = 0;
     dryrunApproachName.textContent = approachName;
@@ -393,7 +479,7 @@ function stopAutoplay() {
   }
 }
 
-// Auto-run question if user clicked "▶ Visualize" from Practice page
+// Auto-run question if user clicked "▶ Visualize" from Practice or History page
 window.addEventListener("DOMContentLoaded", () => {
   const prefill = localStorage.getItem("dsa_prefill_question");
   if (prefill && questionInput) {

@@ -1,6 +1,10 @@
-const API_BASE = "https://datastruct-flow-backend.onrender.com";
+const API_BASE =
+  window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+    ? "http://localhost:8000"
+    : "https://datastruct-flow-backend.onrender.com";
 
 const activeQuestion = localStorage.getItem("dsa_compiler_question");
+const savedCodeFromHistory = localStorage.getItem("dsa_compiler_saved_code");
 
 const standardCompilerWrap = document.getElementById("standardCompilerWrap");
 const leetcodeSplitWrap = document.getElementById("leetcodeSplitWrap");
@@ -45,7 +49,7 @@ function switchLcSubTab(tab) {
 
   if (!tcContent || !resContent) return;
 
-  if (tab === 'testcase') {
+  if (tab === "testcase") {
     tcContent.classList.remove("hidden");
     resContent.classList.add("hidden");
     if (btnTc) btnTc.classList.add("active");
@@ -71,11 +75,22 @@ async function callApi(path, body) {
   return res.json();
 }
 
-function recordCompilerActivity() {
-  const today = new Date().toISOString().split('T')[0];
+function recordCompilerActivity(codeStr = "", langStr = "Python", isSuccess = true) {
+  const today = new Date().toISOString().split("T")[0];
   let activityLog = JSON.parse(localStorage.getItem("dsa_activity_log") || "{}");
   activityLog[today] = (activityLog[today] || 0) + 1;
   localStorage.setItem("dsa_activity_log", JSON.stringify(activityLog));
+
+  // Save solved problem or executed code to History + Supabase
+  if (typeof addHistory === "function" && isSuccess) {
+    addHistory({
+      type: "solved",
+      text: activeQuestion || "Solved in Compiler Workspace",
+      language: langStr,
+      code: codeStr,
+      status: "Accepted",
+    });
+  }
 }
 
 if (activeQuestion) {
@@ -87,22 +102,36 @@ if (activeQuestion) {
   const lcProblemTitle = document.getElementById("lcProblemTitle");
   const lcProblemDescText = document.getElementById("lcProblemDescText");
   if (lcProblemTitle) lcProblemTitle.textContent = activeQuestion;
-  if (lcProblemDescText) lcProblemDescText.textContent = "Loading problem breakdown...";
 
-  callApi("/api/explain", { question: activeQuestion })
-    .then((res) => {
-      if (lcProblemDescText) {
-        lcProblemDescText.innerHTML = `
-          <p><strong>Problem Statement:</strong> ${activeQuestion}</p>
-          <hr style="border: 0; border-top: 1px solid var(--panel-border); margin: 14px 0;">
-          <p><strong>Tutor Breakdown:</strong></p>
-          <p>${res.explanation}</p>
-        `;
-      }
-    })
-    .catch(() => {
-      if (lcProblemDescText) lcProblemDescText.textContent = activeQuestion;
-    });
+  // Check local cache first so Compiler opens in 0ms without re-calling LLM
+  const cachedExp = localStorage.getItem("dsa_last_explanation_" + activeQuestion.trim().toLowerCase());
+  if (cachedExp && lcProblemDescText) {
+    lcProblemDescText.innerHTML = `
+      <p><strong>Problem Statement:</strong> ${activeQuestion}</p>
+      <hr style="border: 0; border-top: 1px solid var(--panel-border); margin: 14px 0;">
+      <p><strong>Tutor Breakdown:</strong></p>
+      <p>${cachedExp}</p>
+    `;
+  } else {
+    if (lcProblemDescText) lcProblemDescText.textContent = "Loading problem breakdown...";
+    callApi("/api/explain", { question: activeQuestion })
+      .then((res) => {
+        try {
+          localStorage.setItem("dsa_last_explanation_" + activeQuestion.trim().toLowerCase(), res.explanation);
+        } catch (e) {}
+        if (lcProblemDescText) {
+          lcProblemDescText.innerHTML = `
+            <p><strong>Problem Statement:</strong> ${activeQuestion}</p>
+            <hr style="border: 0; border-top: 1px solid var(--panel-border); margin: 14px 0;">
+            <p><strong>Tutor Breakdown:</strong></p>
+            <p>${res.explanation}</p>
+          `;
+        }
+      })
+      .catch(() => {
+        if (lcProblemDescText) lcProblemDescText.textContent = activeQuestion;
+      });
+  }
 
   const codeEditorTextarea2 = document.getElementById("codeEditor2");
   const codeLangSelect2 = document.getElementById("codeLangSelect2");
@@ -120,7 +149,13 @@ if (activeQuestion) {
     autoCloseBrackets: true,
   });
   editor2.setSize("100%", "220px");
-  editor2.setValue(BOILERPLATE_FOR[codeLangSelect2?.value || "Python"] || "");
+
+  if (savedCodeFromHistory) {
+    editor2.setValue(savedCodeFromHistory);
+    localStorage.removeItem("dsa_compiler_saved_code");
+  } else {
+    editor2.setValue(BOILERPLATE_FOR[codeLangSelect2?.value || "Python"] || "");
+  }
 
   if (codeLangSelect2) {
     codeLangSelect2.addEventListener("change", () => {
@@ -138,15 +173,17 @@ if (activeQuestion) {
       runCodeBtn2.disabled = true;
       runCodeBtn2.textContent = "Running...";
 
+      const selectedLang = codeLangSelect2 ? codeLangSelect2.value : "Python";
       try {
         const result = await callApi("/api/run-code", {
           code,
-          language: codeLangSelect2 ? codeLangSelect2.value : "Python",
+          language: selectedLang,
           stdin: stdinInput2 ? stdinInput2.value : "",
         });
-        recordCompilerActivity();
+        const isOk = result.exit_code === 0 && !result.stderr && !result.compile_output;
+        recordCompilerActivity(code, selectedLang, isOk);
         renderOutput2(result);
-        switchLcSubTab('result');
+        switchLcSubTab("result");
       } catch (err) {
         alert(err.message);
       } finally {
@@ -182,7 +219,6 @@ if (activeQuestion) {
       }
     }
   }
-
 } else {
   // --- STANDARD COMPILER VIEW ---
   if (compilerHeaderMode) compilerHeaderMode.textContent = "compiler workspace";
@@ -211,6 +247,11 @@ if (activeQuestion) {
     autoCloseBrackets: true,
   });
   editor.setSize("100%", "280px");
+
+  if (savedCodeFromHistory) {
+    editor.setValue(savedCodeFromHistory);
+    localStorage.removeItem("dsa_compiler_saved_code");
+  }
 
   function isUnedited() {
     const current = editor.getValue().trim();
@@ -242,13 +283,15 @@ if (activeQuestion) {
       if (textSpan) textSpan.textContent = "running...";
     }
 
+    const selectedLang = codeLangSelect ? codeLangSelect.value : "Python";
     try {
       const result = await callApi("/api/run-code", {
         code,
-        language: codeLangSelect ? codeLangSelect.value : "Python",
+        language: selectedLang,
         stdin: stdinInput ? stdinInput.value : "",
       });
-      recordCompilerActivity();
+      const isOk = result.exit_code === 0 && !result.stderr && !result.compile_output;
+      recordCompilerActivity(code, selectedLang, isOk);
       renderCodeOutput(result);
     } catch (err) {
       if (errorBox) {
@@ -290,7 +333,6 @@ if (activeQuestion) {
   }
 }
 
-
 // Manual Column Resizer for Standard Compiler
 const splitter = document.getElementById("compilerSplitter");
 const leftPanel = document.getElementById("compilerLeftPanel");
@@ -313,7 +355,6 @@ if (splitter && leftPanel && rightPanel && container) {
     const offsetX = e.clientX - containerRect.left;
     const totalWidth = containerRect.width;
 
-    // Calculate percentage for left panel (min 25%, max 75%)
     let leftPct = (offsetX / totalWidth) * 100;
     if (leftPct < 25) leftPct = 25;
     if (leftPct > 75) leftPct = 75;

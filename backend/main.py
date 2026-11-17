@@ -1,12 +1,6 @@
 """
-DSA Visual Tutor - Backend (Production Ready)
-FastAPI + Groq powered API for:
-  1. /api/explain         -> plain-language explanation (English or Hinglish)
-  2. /api/approaches      -> ranked solution approaches with complexity + reasoning
-  3. /api/dry-run         -> step-by-step JSON trace (array OR tree/graph shape) for animation
-  4. /api/translate       -> translate already-shown content into English / Hinglish / Hindi
-  5. /api/run-code        -> execute user code via local Python subprocess / Piston API
-  6. /api/telemetry/visit -> Zero-Duplicate SHA-256 Unique Visitor Counter
+DSA Visual Tutor - High-Speed Production Backend
+FastAPI + AsyncGroq + In-Memory Cache + Supabase History + Auth
 """
 
 import os
@@ -14,28 +8,52 @@ import sys
 import json
 import re
 import hashlib
+import asyncio
 import subprocess
 import tempfile
-from typing import Optional
+from typing import Optional, List
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from groq import Groq
+from groq import AsyncGroq
+
+# Auth module import
+from auth import (
+    init_db,
+    get_user_by_email,
+    create_user,
+    verify_password,
+    create_access_token,
+    SignupRequest,
+    LoginRequest,
+    AuthResponse,
+)
 
 load_dotenv()
+init_db()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
 
-# Initialize Groq client safely for Render Python environment
-client = None
-if GROQ_API_KEY:
-    try:
-        client = Groq(api_key=GROQ_API_KEY, http_client=httpx.Client())
-    except Exception:
-        client = Groq(api_key=GROQ_API_KEY)
+# Initialize AsyncGroq client for non-blocking parallel calls
+async_client = AsyncGroq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+
+# Fast models prioritized first (skipping slow <think> models unless fallback needed)
+FAST_MODELS = [
+    "llama-3.3-70b-versatile",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
+    "llama-3.1-8b-instant",
+]
+_WORKING_MODEL: Optional[str] = FAST_MODELS[0]
+
+# In-memory LRU-style dictionary cache for instant repeat responses
+_RESPONSE_CACHE: dict = {}
+MAX_CACHE_SIZE = 300
 
 PISTON_URL = "https://emkc.org/api/v2/piston"
 LANGUAGE_MAP = {
@@ -51,9 +69,8 @@ FILE_EXTENSIONS = {
     "javascript": "main.js",
 }
 _piston_runtime_cache: dict = {}
-_WORKING_MODEL: Optional[str] = None
 
-app = FastAPI(title="DSA Visual Tutor API")
+app = FastAPI(title="DSA Visual Tutor API (Turbo)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -67,14 +84,15 @@ app.add_middleware(
 
 class QuestionRequest(BaseModel):
     question: str
-    explain_language: Optional[str] = "english"  # "english" or "hinglish"
-    user_name: Optional[str] = None  # student's first name, used to address them as "<Name> ji"
+    explain_language: Optional[str] = "english"
+    user_name: Optional[str] = None
+    user_identifier: Optional[str] = None
 
 
 class DryRunRequest(BaseModel):
     question: str
     approach: str
-    narrate_language: Optional[str] = "english"  # "english" or "hinglish"
+    narrate_language: Optional[str] = "english"
 
 
 class RunCodeRequest(BaseModel):
@@ -85,7 +103,7 @@ class RunCodeRequest(BaseModel):
 
 class TranslateRequest(BaseModel):
     text: str
-    target: str = "english"  # "english", "hinglish", or "hindi"
+    target: str = "english"
 
 
 class TelemetryPing(BaseModel):
@@ -93,56 +111,39 @@ class TelemetryPing(BaseModel):
     platform: Optional[str] = "Coder"
 
 
-# ---------- Helper: Dynamic Model Discovery & Groq Caller ----------
-
-def get_live_models() -> list:
-    """Groq API se live models ki list nikalta hai taaki decommissioned error kabhi na aaye."""
-    live_models = []
-    if client is not None:
-        try:
-            models_resp = client.models.list()
-            for m in models_resp.data:
-                m_id = m.id
-                # Audio, whisper, guard aur embedding models ko skip karein
-                if any(skip in m_id.lower() for skip in ["whisper", "guard", "tts", "embed", "playai", "allam"]):
-                    continue
-                live_models.append(m_id)
-        except Exception:
-            pass
-
-    # Priority order: Llama / Qwen / DeepSeek / Gemma models ko sabse aage rakhein
-    preferred_keywords = ["llama-4", "llama-3.3", "llama-3.1", "qwen", "deepseek", "gemma", "llama"]
-    sorted_models = sorted(
-        live_models,
-        key=lambda x: next((i for i, kw in enumerate(preferred_keywords) if kw in x.lower()), 999)
-    )
-
-    # Backup list agar list() call fail ho
-    backups = [
-        "meta-llama/llama-4-scout-17b-16e-instruct",
-        "meta-llama/llama-4-maverick-17b-128e-instruct",
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-        "qwen-qwq-32b",
-        "deepseek-r1-distill-llama-70b",
-    ]
-    for b in backups:
-        if b not in sorted_models:
-            sorted_models.append(b)
-
-    return sorted_models
+class HistoryCreateRequest(BaseModel):
+    user_identifier: str
+    entry_type: str  # "question", "solved", "dryrun"
+    question_text: str
+    approach: Optional[str] = ""
+    language: Optional[str] = ""
+    code: Optional[str] = ""
+    status: Optional[str] = ""
 
 
-def call_llm(system_prompt: str, user_prompt: str) -> str:
+# ---------- Helper: Cache + Fast Async Groq Caller ----------
+
+def _get_cache_key(prefix: str, *args) -> str:
+    raw = prefix + ":" + "|".join(str(a).strip().lower() for a in args)
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
+
+def _set_cache(key: str, val):
+    if len(_RESPONSE_CACHE) >= MAX_CACHE_SIZE:
+        first_key = next(iter(_RESPONSE_CACHE))
+        _RESPONSE_CACHE.pop(first_key, None)
+    _RESPONSE_CACHE[key] = val
+
+
+async def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 1024) -> str:
     global _WORKING_MODEL
-    if client is None:
+    if async_client is None:
         raise HTTPException(
             status_code=500,
-            detail="GROQ_API_KEY not set. Add it to Render Environment Variables."
+            detail="GROQ_API_KEY not set in Environment Variables."
         )
 
-    # Agar pehle se ek working model mil chuka hai, toh sabse pehle usi ko try karein
-    models_to_try = get_live_models()
+    models_to_try = list(FAST_MODELS)
     if _WORKING_MODEL and _WORKING_MODEL in models_to_try:
         models_to_try.remove(_WORKING_MODEL)
         models_to_try.insert(0, _WORKING_MODEL)
@@ -150,16 +151,16 @@ def call_llm(system_prompt: str, user_prompt: str) -> str:
     errors = []
     for model_to_use in models_to_try:
         try:
-            response = client.chat.completions.create(
+            response = await async_client.chat.completions.create(
                 model=model_to_use,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                temperature=0.3,
+                temperature=0.2,
+                max_tokens=max_tokens,
             )
-            content = response.choices[0].message.content
-            # DeepSeek R1 jaise models <think>...</think> tags add karte hain, unhe strip karein
+            content = response.choices[0].message.content or ""
             content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
             _WORKING_MODEL = model_to_use
             return content
@@ -167,11 +168,10 @@ def call_llm(system_prompt: str, user_prompt: str) -> str:
             errors.append(f"{model_to_use}: {str(e)}")
             continue
 
-    raise HTTPException(status_code=502, detail=f"Groq API error: {errors[0] if errors else 'No working models found'}")
+    raise HTTPException(status_code=502, detail=f"Groq API error: {errors[0] if errors else 'No working models'}")
 
 
 def extract_json(raw_text: str):
-    """Accurately extracts either a JSON Array [...] or JSON Object {...} depending on which appears first."""
     cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
     cleaned = re.sub(r"```json|```", "", cleaned).strip()
 
@@ -190,58 +190,113 @@ def extract_json(raw_text: str):
     return json.loads(cleaned)
 
 
-# ---------- Endpoints ----------
+# ---------- Helper: Supabase REST Functions ----------
+
+async def supabase_insert_history(item: HistoryCreateRequest):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return None
+    url = f"{SUPABASE_URL}/rest/v1/user_history"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+    payload = {
+        "user_identifier": item.user_identifier.strip().lower(),
+        "entry_type": item.entry_type,
+        "question_text": item.question_text,
+        "approach": item.approach or "",
+        "language": item.language or "",
+        "code": item.code or "",
+        "status": item.status or "",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            res = await client.post(url, headers=headers, json=payload)
+            if res.status_code in (200, 201):
+                return res.json()
+    except Exception:
+        pass
+    return None
+
+
+# ---------- Auth Endpoints ----------
+
+@app.post("/api/auth/signup", response_model=AuthResponse)
+def signup(req: SignupRequest):
+    existing = get_user_by_email(req.email.lower().strip())
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    user = create_user(req.name.strip(), req.email.lower().strip(), req.password)
+    token = create_access_token({"sub": user["email"]})
+    return AuthResponse(access_token=token, name=user["name"], email=user["email"])
+
+
+@app.post("/api/auth/login", response_model=AuthResponse)
+def login(req: LoginRequest):
+    user = get_user_by_email(req.email.lower().strip())
+    if not user or not verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    token = create_access_token({"sub": user["email"]})
+    return AuthResponse(access_token=token, name=user["name"], email=user["email"])
+
+
+# ---------- Core Endpoints ----------
 
 @app.get("/")
 def health():
     return {
         "status": "ok",
         "active_model": _WORKING_MODEL,
-        "detected_live_models": get_live_models()[:8],
-        "api_key_present": bool(GROQ_API_KEY)
+        "cache_entries": len(_RESPONSE_CACHE),
+        "api_key_present": bool(GROQ_API_KEY),
+        "supabase_connected": bool(SUPABASE_URL and SUPABASE_KEY),
     }
 
 
 @app.post("/api/explain")
-def explain_question(req: QuestionRequest):
+async def explain_question(req: QuestionRequest):
+    cache_key = _get_cache_key("explain", req.question, req.explain_language, req.user_name)
+    if cache_key in _RESPONSE_CACHE:
+        return {"explanation": _RESPONSE_CACHE[cache_key], "cached": True}
+
     if req.explain_language == "hinglish":
         language_instruction = (
-            "Respond in natural Hinglish (Hindi-English mix, written in Roman/English script "
-            "— NOT Devanagari), the way an Indian CS student casually explains things to a "
-            "friend. Keep technical terms (array, pointer, time complexity, etc.) in English "
-            "since that's how students actually say them; mix in Hindi for the explanatory "
-            "and connecting words. Keep it natural, not forced."
+            "Respond in natural Hinglish (Hindi-English mix, written in Roman script). "
+            "Keep technical terms in English."
         )
     else:
         language_instruction = "Respond in clear, simple English."
 
-    # Sanitise the name (letters only, first word) so it can't be used to inject instructions
     first_name = ""
     if req.user_name:
         parts = re.sub(r"[^\w\s]|\d|_", "", req.user_name).split()
         if parts:
             first_name = parts[0][:20].capitalize()
     name_instruction = (
-        f"The student's name is {first_name}. Start the explanation by addressing them as "
-        f"'{first_name} ji' (first name followed by 'ji'), and use '{first_name} ji' once more "
-        "naturally later in the explanation. "
+        f"Address the student as '{first_name} ji' at the start and once naturally later. "
         if first_name else ""
     )
 
     system_prompt = (
         "You are a friendly DSA tutor for Indian CS students preparing for placements. "
         "Explain the given problem in simple language: what it's asking, a real-world "
-        "analogy, and constraints/edge cases to watch for. Keep it under 150 words. "
-        f"{name_instruction}"
-        f"{language_instruction} "
+        "analogy, and constraints/edge cases to watch for. Keep it under 140 words. "
+        f"{name_instruction}{language_instruction} "
         "Respond in plain text, no markdown headers."
     )
-    text = call_llm(system_prompt, req.question)
+    text = await call_llm(system_prompt, req.question, max_tokens=400)
+    _set_cache(cache_key, text)
     return {"explanation": text}
 
 
 @app.post("/api/approaches")
-def get_approaches(req: QuestionRequest):
+async def get_approaches(req: QuestionRequest):
+    cache_key = _get_cache_key("approaches", req.question)
+    if cache_key in _RESPONSE_CACHE:
+        return {"approaches": _RESPONSE_CACHE[cache_key], "cached": True}
+
     system_prompt = (
         "You are a DSA tutor. Given a problem or topic, return ONLY a valid JSON array "
         "(no markdown, no commentary) of 2 to 4 approach objects ordered from brute force "
@@ -250,27 +305,17 @@ def get_approaches(req: QuestionRequest):
         '"is_best" (boolean), "why" (1-2 sentence reasoning). '
         "IMPORTANT: Your output MUST start with '[' and end with ']'."
     )
-    raw = call_llm(system_prompt, req.question)
+    raw = await call_llm(system_prompt, req.question, max_tokens=600)
     try:
         parsed = extract_json(raw)
-
-        # SMART ARRAY NORMALIZER: Guarantees 'approaches' is ALWAYS a list [...]
         if isinstance(parsed, list):
             approaches = parsed
         elif isinstance(parsed, dict):
-            found_list = None
-            for val in parsed.values():
-                if isinstance(val, list):
-                    found_list = val
-                    break
-            if found_list is not None:
-                approaches = found_list
-            else:
-                approaches = [parsed]
+            found_list = next((v for v in parsed.values() if isinstance(v, list)), None)
+            approaches = found_list if found_list is not None else [parsed]
         else:
             approaches = []
 
-        # Ensure every item inside the list has required keys so frontend never crashes
         clean_approaches = []
         for idx, item in enumerate(approaches):
             if isinstance(item, dict):
@@ -281,85 +326,61 @@ def get_approaches(req: QuestionRequest):
                     "is_best": bool(item.get("is_best", idx == len(approaches) - 1)),
                     "why": str(item.get("why", "Standard approach for this problem."))
                 })
-
         if not clean_approaches:
-            raise ValueError("Empty approaches list")
-
+            raise ValueError("Empty approaches")
     except Exception:
         raise HTTPException(status_code=502, detail="LLM returned invalid JSON. Try again.")
 
+    _set_cache(cache_key, clean_approaches)
     return {"approaches": clean_approaches}
 
 
+@app.post("/api/analyze")
+async def analyze_combined(req: QuestionRequest):
+    """Combined parallel endpoint: runs explain + approaches concurrently for 2x speed."""
+    exp_res, app_res = await asyncio.gather(
+        explain_question(req),
+        get_approaches(req)
+    )
+    return {
+        "explanation": exp_res["explanation"],
+        "approaches": app_res["approaches"]
+    }
+
+
 @app.post("/api/dry-run")
-def dry_run(req: DryRunRequest):
+async def dry_run(req: DryRunRequest):
+    cache_key = _get_cache_key("dryrun", req.question, req.approach, req.narrate_language)
+    if cache_key in _RESPONSE_CACHE:
+        return _RESPONSE_CACHE[cache_key]
+
     if req.narrate_language == "hinglish":
         action_language_instruction = (
-            "Write every 'action' description in natural Hinglish (Hindi-English mix, "
-            "Roman script — NOT Devanagari), the way an Indian CS student casually narrates "
-            "what's happening. Keep technical terms (pointer, node, index, visited, etc.) in "
-            "English since that's how students actually say them."
+            "Write every 'action' description in natural Hinglish (Roman script)."
         )
     else:
         action_language_instruction = "Write every 'action' description in clear, proper English."
 
     system_prompt = (
-        "You are a DSA visualizer engine for a student-facing learning tool. Given a problem "
-        "and a chosen approach, simulate the algorithm on a SMALL sample input and return "
-        "ONLY valid JSON (no markdown, no commentary, no code fences).\n\n"
-        "STEP 1 — Decide the structure_type:\n"
-        "- \"array\" for array/string/two-pointer/sliding-window/sorting/searching problems.\n"
-        "- \"tree\" for binary tree / BST problems.\n"
-        "- \"graph\" for graph traversal / shortest-path / connectivity problems.\n\n"
-        "STEP 2 — Return JSON in ONE of these two shapes, matching structure_type:\n\n"
+        "You are a DSA visualizer engine. Given a problem and a chosen approach, simulate the "
+        "algorithm on a SMALL sample input and return ONLY valid JSON (no markdown).\n\n"
+        "STEP 1 — Decide structure_type: \"array\", \"tree\", or \"graph\".\n"
+        "STEP 2 — Return JSON in ONE of these two shapes:\n"
         "=== SHAPE A (structure_type = \"array\") ===\n"
-        "{\n"
-        '  "structure_type": "array",\n'
-        '  "input": [ ... ],\n'
-        '  "steps": [\n'
-        "    {\n"
-        '      "array": [ ... state AFTER this step\'s change, if any ... ],\n'
-        '      "highlight": [ indices touched this step ],\n'
-        '      "pointers": { "i": 0, "j": 1 },\n'
-        '      "action": "2-3 full sentences explaining, in proper student-friendly language: '
-        'which pointer(s) are involved, what values they are looking at right now, what '
-        'comparison or operation is happening, WHY it happens, and how the pointer(s) will '
-        'move next. This should read like a tutor narrating the algorithm, not a terse log line.",\n'
-        '      "swapped": false\n'
-        "    }\n"
-        "  ]\n"
-        "}\n\n"
+        '{"structure_type": "array", "input": [...], "steps": [{"array": [...], "highlight": [0], '
+        '"pointers": {"i": 0}, "action": "2 sentences explaining pointers, comparison, and next move.", "swapped": false}]}\n'
         "=== SHAPE B (structure_type = \"tree\" or \"graph\") ===\n"
-        "{\n"
-        '  "structure_type": "tree" | "graph",\n'
-        '  "nodes": [ { "id": "A", "value": 5, "x": 0-700, "y": 0-320 } ... up to 10 nodes, '
-        "laid out with sensible non-overlapping coordinates — a top-down hierarchy for trees, "
-        "a roughly circular/force-like spread for graphs ],\n"
-        '  "edges": [ { "from": "A", "to": "B" } ... ],\n'
-        '  "steps": [\n'
-        "    {\n"
-        '      "current": "A",\n'
-        '      "visited": [ "A", "B" ],\n'
-        '      "frontier": [ "C", "D" ],\n'
-        '      "active_edge": { "from": "A", "to": "B" } | null,\n'
-        '      "pointers": { "queue_front": "C" },\n'
-        '      "action": "2-3 full sentences explaining what node is being visited, why it was '
-        'chosen next (e.g. from the front of the queue / top of the stack / smallest distance), '
-        'what its neighbours are, and what happens as a result — written like a tutor narrating, '
-        'not a terse log line."\n'
-        "    }\n"
-        "  ]\n"
-        "}\n\n"
-        "General rules: keep steps between 5 and 15. Use a small sample (max 7 array elements, "
-        "or max 10 tree/graph nodes) so it stays easy to follow. "
-        f"{action_language_instruction} "
-        "Pick exactly one shape based on structure_type and do not mix fields from the other shape."
+        '{"structure_type": "tree", "nodes": [{"id": "A", "value": 5, "x": 350, "y": 50}], '
+        '"edges": [{"from": "A", "to": "B"}], "steps": [{"current": "A", "visited": ["A"], '
+        '"frontier": ["B"], "active_edge": {"from": "A", "to": "B"}, "pointers": {"curr": "A"}, '
+        '"action": "2 sentences explaining node visit and neighbours."}]}\n'
+        "Keep steps between 5 and 10. Max 6 array elements or 8 nodes. "
+        f"{action_language_instruction}"
     )
     user_prompt = f"Problem: {req.question}\nApproach to simulate: {req.approach}"
-    raw = call_llm(system_prompt, user_prompt)
+    raw = await call_llm(system_prompt, user_prompt, max_tokens=1400)
     try:
         trace = extract_json(raw)
-        # Normalize in case LLM returned raw list of steps
         if isinstance(trace, list):
             trace = {"structure_type": "array", "input": [2, 7, 11, 15], "steps": trace}
         if "structure_type" not in trace:
@@ -368,54 +389,92 @@ def dry_run(req: DryRunRequest):
             trace["steps"] = []
     except Exception:
         raise HTTPException(status_code=502, detail="LLM returned invalid JSON. Try again.")
+
+    _set_cache(cache_key, trace)
     return trace
 
 
 @app.post("/api/translate")
-def translate_text(req: TranslateRequest):
-    if req.target == "hinglish":
-        instruction = (
-            "Translate/rewrite the following text into natural Hinglish (Hindi-English mix, "
-            "Roman script — NOT Devanagari), the way an Indian CS student casually explains "
-            "things. Keep technical terms (array, pointer, complexity, etc.) in English; mix "
-            "Hindi for the connecting and explanatory words. Keep the same meaning and length."
-        )
-    elif req.target == "hindi":
-        instruction = (
-            "Translate the following text into clear, simple Hindi using Devanagari script. "
-            "You may keep well-established technical/programming terms (array, pointer, "
-            "complexity, function names, code snippets) in English/Roman script since that is "
-            "standard practice, but translate all explanatory sentences fully into Hindi."
-        )
-    else:
-        instruction = "Translate/rewrite the following text into clear, simple English."
+async def translate_text(req: TranslateRequest):
+    cache_key = _get_cache_key("translate", req.text, req.target)
+    if cache_key in _RESPONSE_CACHE:
+        return {"text": _RESPONSE_CACHE[cache_key]}
 
-    system_prompt = (
-        f"{instruction} Return ONLY the translated text, no preamble, no quotes, "
-        "no markdown formatting."
-    )
-    translated = call_llm(system_prompt, req.text)
+    if req.target == "hinglish":
+        instruction = "Translate into natural Hinglish (Roman script). Keep technical terms in English."
+    elif req.target == "hindi":
+        instruction = "Translate into clear Hindi using Devanagari script. Keep technical terms in English."
+    else:
+        instruction = "Translate into clear, simple English."
+
+    system_prompt = f"{instruction} Return ONLY the translated text, no preamble."
+    translated = await call_llm(system_prompt, req.text, max_tokens=500)
+    _set_cache(cache_key, translated)
     return {"text": translated}
 
 
-# ---------- Compiler (Local Python + Fallback) ----------
+# ---------- Supabase History Endpoints ----------
+
+@app.post("/api/history")
+async def save_user_history(req: HistoryCreateRequest):
+    saved = await supabase_insert_history(req)
+    return {"status": "ok", "supabase_synced": bool(saved), "data": saved}
+
+
+@app.get("/api/history")
+async def fetch_user_history(user_identifier: str = "guest", limit: int = 100):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return {"history": [], "supabase_connected": False}
+
+    clean_id = user_identifier.strip().lower()
+    url = (
+        f"{SUPABASE_URL}/rest/v1/user_history"
+        f"?user_identifier=eq.{clean_id}&order=created_at.desc&limit={limit}"
+    )
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            res = await client.get(url, headers=headers)
+            if res.status_code == 200:
+                return {"history": res.json(), "supabase_connected": True}
+    except Exception:
+        pass
+    return {"history": [], "supabase_connected": False}
+
+
+@app.delete("/api/history")
+async def clear_user_history(user_identifier: str):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return {"status": "skipped"}
+    clean_id = user_identifier.strip().lower()
+    url = f"{SUPABASE_URL}/rest/v1/user_history?user_identifier=eq.{clean_id}"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            await client.delete(url, headers=headers)
+    except Exception:
+        pass
+    return {"status": "cleared"}
+
+
+# ---------- Compiler (Local Python + Piston API for C++/Java/JS) ----------
 
 async def get_piston_version(language_id: str) -> str:
-    """Piston needs an exact runtime version per language; fetch + cache it."""
     if language_id in _piston_runtime_cache:
         return _piston_runtime_cache[language_id]
-    try:
-        async with httpx.AsyncClient(timeout=15) as http_client:
-            res = await http_client.get(f"{PISTON_URL}/runtimes")
-            res.raise_for_status()
-            runtimes = res.json()
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"Could not reach code execution service: {e}")
-
-    for rt in runtimes:
-        if rt["language"] == language_id:
-            _piston_runtime_cache[language_id] = rt["version"]
-            return rt["version"]
+    async with httpx.AsyncClient(timeout=10) as http_client:
+        res = await http_client.get(f"{PISTON_URL}/runtimes")
+        res.raise_for_status()
+        for rt in res.json():
+            if rt["language"] == language_id:
+                _piston_runtime_cache[language_id] = rt["version"]
+                return rt["version"]
     raise HTTPException(status_code=400, detail=f"Unsupported language: {language_id}")
 
 
@@ -427,7 +486,6 @@ async def run_code(req: RunCodeRequest):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
             f.write(req.code)
             temp_file_name = f.name
-
         try:
             process = subprocess.run(
                 [sys.executable, temp_file_name],
@@ -450,35 +508,48 @@ async def run_code(req: RunCodeRequest):
                 os.unlink(temp_file_name)
             return {
                 "stdout": "",
-                "stderr": "Error: Code execution timed out (limit: 5 seconds).",
+                "stderr": "Error: Code execution timed out (5s limit).",
                 "compile_output": "",
                 "exit_code": -1,
                 "language": "python",
                 "version": "3.x"
             }
-        except Exception as e:
-            if os.path.exists(temp_file_name):
-                os.unlink(temp_file_name)
+
+    # Piston Execution for C++, Java, JavaScript
+    try:
+        version = await get_piston_version(language_id)
+        payload = {
+            "language": language_id,
+            "version": version,
+            "files": [{"name": FILE_EXTENSIONS.get(language_id, "main.txt"), "content": req.code}],
+            "stdin": req.stdin or "",
+        }
+        async with httpx.AsyncClient(timeout=15) as http_client:
+            res = await http_client.post(f"{PISTON_URL}/execute", json=payload)
+            res.raise_for_status()
+            data = res.json()
+            run_data = data.get("run", {})
+            compile_data = data.get("compile", {})
             return {
-                "stdout": "",
-                "stderr": str(e),
-                "compile_output": "",
-                "exit_code": -1,
-                "language": "python",
-                "version": "3.x"
+                "stdout": run_data.get("stdout", ""),
+                "stderr": run_data.get("stderr", ""),
+                "compile_output": compile_data.get("output", "") if compile_data.get("code", 0) != 0 else "",
+                "exit_code": run_data.get("code", 0),
+                "language": language_id,
+                "version": version,
             }
+    except Exception as e:
+        return {
+            "stdout": "",
+            "stderr": f"Execution service error: {str(e)}",
+            "compile_output": "",
+            "exit_code": -1,
+            "language": language_id,
+            "version": "latest"
+        }
 
-    return {
-        "stdout": f"Executed ({req.language}):\n" + req.code,
-        "stderr": "",
-        "compile_output": "",
-        "exit_code": 0,
-        "language": language_id,
-        "version": "latest"
-    }
 
-
-# ---------- Zero-Duplicate Unique Visitor Counter ----------
+# ---------- Unique Visitor Telemetry ----------
 
 TELEMETRY_FILE = os.path.join(os.path.dirname(__file__), "visitors_store.json")
 BASE_CODERS_COUNT = 54
@@ -516,21 +587,18 @@ def register_unique_visit(req: TelemetryPing, request: Request):
         data["fingerprints"].append(clean_fp)
         data["ips"].append(combined_key)
         is_new_device = True
-
         short_id = clean_fp[:5].lower()
-        masked_email = f"coder.{short_id}***@gmail.com"
         data["recent"].insert(0, {
             "id": f"DEV-{clean_fp[:6].upper()}",
-            "email": masked_email,
+            "email": f"coder.{short_id}***@gmail.com",
             "platform": req.platform,
             "action": "Active on DSA Workspace"
         })
         data["recent"] = data["recent"][:10]
         _save_telemetry(data)
 
-    total_unique = BASE_CODERS_COUNT + len(data["fingerprints"])
     return {
-        "total_unique_coders": total_unique,
+        "total_unique_coders": BASE_CODERS_COUNT + len(data["fingerprints"]),
         "is_new_device": is_new_device,
         "device_badge": f"DEV-{clean_fp[:6].upper()}",
         "recent_devices": data["recent"]
