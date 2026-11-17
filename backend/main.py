@@ -241,6 +241,7 @@ def extract_json(raw_text: str):
 
 async def supabase_insert_history(item: HistoryCreateRequest):
     if not SUPABASE_URL or not SUPABASE_KEY:
+        print("❌ SUPABASE_URL or SUPABASE_KEY is missing in backend!")
         return None
     url = f"{SUPABASE_URL}/rest/v1/user_history"
     headers = {
@@ -261,10 +262,13 @@ async def supabase_insert_history(item: HistoryCreateRequest):
     try:
         async with httpx.AsyncClient(timeout=8) as http_c:
             res = await http_c.post(url, headers=headers, json=payload)
+            print(f"🔍 Supabase Response Status: {res.status_code}, Body: {res.text}")
             if res.status_code in (200, 201):
                 return res.json()
-    except Exception:
-        pass
+            else:
+                print(f"❌ Supabase error response: {res.text}")
+    except Exception as e:
+        print(f"❌ Supabase connection exception: {str(e)}")
     return None
 
 
