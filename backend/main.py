@@ -1,6 +1,6 @@
 """
 DSA Visual Tutor - High-Speed Production Backend
-FastAPI + AsyncGroq + Cached Live Model Discovery + In-Memory Cache + Supabase History + Auth
+FastAPI + AsyncGroq + Cached Live Model Discovery + In-Memory Cache + Supabase History + Auth + ElevenLabs TTS
 """
 
 import os
@@ -15,6 +15,7 @@ from typing import Optional, List
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -38,6 +39,8 @@ init_db()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM").strip()
 
 # Initialize AsyncGroq client safely for Render Python environment
 async_client = None
@@ -51,9 +54,11 @@ if GROQ_API_KEY:
 _CACHED_MODELS: List[str] = []
 _WORKING_MODEL: Optional[str] = None
 
-# In-memory LRU-style dictionary cache for instant repeat responses
+# In-memory LRU-style dictionary cache for instant repeat responses & audio
 _RESPONSE_CACHE: dict = {}
+_AUDIO_CACHE: dict = {}
 MAX_CACHE_SIZE = 300
+MAX_AUDIO_CACHE_SIZE = 100
 
 PISTON_URL = "https://emkc.org/api/v2/piston"
 LANGUAGE_MAP = {
@@ -106,6 +111,11 @@ class TranslateRequest(BaseModel):
     target: str = "english"
 
 
+class TTSRequest(BaseModel):
+    text: str
+    voice_id: Optional[str] = None
+
+
 class TelemetryPing(BaseModel):
     device_hash: str
     platform: Optional[str] = "Coder"
@@ -133,6 +143,13 @@ def _set_cache(key: str, val):
         first_key = next(iter(_RESPONSE_CACHE))
         _RESPONSE_CACHE.pop(first_key, None)
     _RESPONSE_CACHE[key] = val
+
+
+def _set_audio_cache(key: str, audio_bytes: bytes):
+    if len(_AUDIO_CACHE) >= MAX_AUDIO_CACHE_SIZE:
+        first_key = next(iter(_AUDIO_CACHE))
+        _AUDIO_CACHE.pop(first_key, None)
+    _AUDIO_CACHE[key] = audio_bytes
 
 
 async def get_cached_live_models() -> List[str]:
@@ -305,6 +322,7 @@ async def health():
         "cache_entries": len(_RESPONSE_CACHE),
         "api_key_present": bool(GROQ_API_KEY),
         "supabase_connected": bool(SUPABASE_URL and SUPABASE_KEY),
+        "elevenlabs_configured": bool(ELEVENLABS_API_KEY),
     }
 
 
@@ -516,6 +534,58 @@ async def translate_text(req: TranslateRequest):
     translated = await call_llm(system_prompt, req.text, max_tokens=500)
     _set_cache(cache_key, translated)
     return {"text": translated}
+
+
+# ---------- ElevenLabs TTS Voice Endpoint (with Memory Cache) ----------
+
+@app.post("/api/tts")
+async def generate_tts(req: TTSRequest):
+    if not ELEVENLABS_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="ELEVENLABS_API_KEY not set in Render Environment Variables."
+        )
+
+    clean_text = (req.text or "").strip()
+    if not clean_text:
+        raise HTTPException(status_code=400, detail="Empty text for TTS")
+
+    voice_id = (req.voice_id or ELEVENLABS_VOICE_ID or "21m00Tcm4TlvDq8ikWAM").strip()
+    audio_key = _get_cache_key("tts", voice_id, clean_text)
+
+    # Return cached MP3 bytes immediately if already generated once
+    if audio_key in _AUDIO_CACHE:
+        return Response(content=_AUDIO_CACHE[audio_key], media_type="audio/mpeg")
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    headers = {
+        "Accept": "audio/mpeg",
+        "Content-Type": "application/json",
+        "xi-api-key": ELEVENLABS_API_KEY,
+    }
+    payload = {
+        "text": clean_text,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {
+            "stability": 0.50,
+            "similarity_boost": 0.78,
+        },
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            res = await client.post(url, headers=headers, json=payload)
+            if res.status_code != 200:
+                raise HTTPException(
+                    status_code=res.status_code,
+                    detail=f"ElevenLabs API error: {res.text}"
+                )
+            _set_audio_cache(audio_key, res.content)
+            return Response(content=res.content, media_type="audio/mpeg")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"TTS connection failed: {str(e)}")
 
 
 # ---------- Supabase History Endpoints ----------

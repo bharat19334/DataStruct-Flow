@@ -60,10 +60,13 @@ let currentSteps = [];
 let currentStepIndex = 0;
 let autoplayTimer = null;
 
-// ---------- Text-to-speech ----------
+// ---------- ElevenLabs TTS + Browser Fallback ----------
 const synth = window.speechSynthesis;
 const translateGroup = document.getElementById("translateGroup");
 let cachedVoices = [];
+let currentAudio = null;
+let ttsAbortController = null;
+const audioBlobCache = new Map();
 
 function loadVoices() {
   cachedVoices = synth ? synth.getVoices() : [];
@@ -95,8 +98,11 @@ function pickBestVoice(langCode) {
   return preferred || pool[0];
 }
 
-function speak(text, { onEnd, langMode } = {}) {
-  if (!synth) return;
+function fallbackBrowserSpeak(text, { onEnd, langMode } = {}) {
+  if (!synth) {
+    if (onEnd) onEnd();
+    return;
+  }
   synth.cancel();
   const mode = langMode || currentTranslateLang();
   const lang = langCodeFor(mode);
@@ -104,8 +110,8 @@ function speak(text, { onEnd, langMode } = {}) {
   utter.lang = lang;
   const voice = pickBestVoice(lang);
   if (voice) utter.voice = voice;
-  utter.rate = 0.88;
-  utter.pitch = 0.92;
+  utter.rate = 0.92;
+  utter.pitch = 0.95;
   utter.volume = 1;
   utter.onend = () => {
     if (onEnd) onEnd();
@@ -113,7 +119,86 @@ function speak(text, { onEnd, langMode } = {}) {
   synth.speak(utter);
 }
 
+async function speak(text, { onEnd, langMode, updateButton = false } = {}) {
+  const clean = (text || "").trim();
+  if (!clean) return;
+
+  stopSpeaking();
+
+  if (updateButton) {
+    listenBtn?.classList.add("speaking");
+    if (listenText) listenText.textContent = "loading voice...";
+  }
+
+  try {
+    let audioUrl = audioBlobCache.get(clean);
+    if (!audioUrl) {
+      ttsAbortController = new AbortController();
+      const res = await fetch(`${API_BASE}/api/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: clean }),
+        signal: ttsAbortController.signal,
+      });
+
+      if (!res.ok) {
+        throw new Error(`TTS HTTP ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      audioUrl = URL.createObjectURL(blob);
+      audioBlobCache.set(clean, audioUrl);
+    }
+
+    currentAudio = new Audio(audioUrl);
+    if (updateButton && listenText) {
+      listenText.textContent = "stop";
+    }
+
+    currentAudio.onended = () => {
+      currentAudio = null;
+      if (updateButton) {
+        listenBtn?.classList.remove("speaking");
+        if (listenText) listenText.textContent = "listen";
+      }
+      if (onEnd) onEnd();
+    };
+
+    currentAudio.onerror = () => {
+      currentAudio = null;
+      fallbackBrowserSpeak(clean, { onEnd, langMode });
+    };
+
+    await currentAudio.play();
+  } catch (err) {
+    if (err.name === "AbortError") return;
+    // Fallback to browser voice if ElevenLabs quota is exceeded or unavailable
+    if (updateButton && listenText) {
+      listenText.textContent = "stop";
+    }
+    fallbackBrowserSpeak(clean, {
+      langMode,
+      onEnd: () => {
+        if (updateButton) {
+          listenBtn?.classList.remove("speaking");
+          if (listenText) listenText.textContent = "listen";
+        }
+        if (onEnd) onEnd();
+      },
+    });
+  }
+}
+
 function stopSpeaking() {
+  if (ttsAbortController) {
+    ttsAbortController.abort();
+    ttsAbortController = null;
+  }
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+    currentAudio = null;
+  }
   if (synth) synth.cancel();
   listenBtn?.classList.remove("speaking");
   if (listenText) listenText.textContent = "listen";
@@ -167,21 +252,14 @@ if (translateGroup) {
 
 if (listenBtn) {
   listenBtn.addEventListener("click", () => {
-    if (!synth) {
-      showError("Voice not supported in this browser. Try Chrome or Edge.");
-      return;
-    }
-    if (synth.speaking) {
+    const isPlayingEleven = currentAudio && !currentAudio.paused;
+    const isPlayingSynth = synth && synth.speaking;
+    if (isPlayingEleven || isPlayingSynth || listenBtn.classList.contains("speaking")) {
       stopSpeaking();
       return;
     }
-    listenBtn.classList.add("speaking");
-    listenText.textContent = "stop";
     speak(explanationText.textContent, {
-      onEnd: () => {
-        listenBtn.classList.remove("speaking");
-        listenText.textContent = "listen";
-      },
+      updateButton: true,
     });
   });
 }
@@ -273,7 +351,6 @@ async function runTutor() {
       savedExp = explainRes.explanation;
       explanationText.textContent = explainRes.explanation;
       resetTranslationState(explainRes.explanation);
-      // Also store explanation in localStorage so Compiler page can reuse it without re-fetching
       try {
         localStorage.setItem("dsa_last_explanation_" + question.trim().toLowerCase(), explainRes.explanation);
       } catch (e) {}
