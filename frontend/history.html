@@ -7,6 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<link rel="prefetch" href="dashboard.html">
+<link rel="prefetch" href="compiler.html">
 <script src="theme.js"></script>
 <style>
   .history-header-row {
@@ -149,7 +151,7 @@
     <header class="topbar topbar-slim">
       <div class="topbar-status">
         <span class="dot dot-live"></span>
-        <span id="syncStatusText">history synced with supabase</span>
+        <span id="syncStatusText">private history synced with supabase</span>
       </div>
     </header>
 
@@ -171,7 +173,7 @@
         </div>
 
         <div id="historyList" class="history-list">
-          <div class="action-line">Loading your history from Supabase...</div>
+          <div class="action-line">Loading your private history from Supabase...</div>
         </div>
       </section>
     </main>
@@ -186,6 +188,7 @@
   const clearBtn = document.getElementById("clearHistoryBtn");
 
   let allItems = getHistory();
+  let currentFiltered = [];
   let currentFilter = "all";
 
   function formatTime(ts) {
@@ -203,7 +206,7 @@
 
   function renderList() {
     const query = (searchInput.value || "").trim().toLowerCase();
-    const filtered = allItems.filter((item) => {
+    currentFiltered = allItems.filter((item) => {
       const matchesTab = currentFilter === "all" || item.type === currentFilter;
       const matchesQuery =
         !query ||
@@ -213,17 +216,17 @@
       return matchesTab && matchesQuery;
     });
 
-    if (filtered.length === 0) {
+    if (currentFiltered.length === 0) {
       historyListEl.innerHTML = `
         <div class="coming-soon" style="padding: 40px 20px;">
           <div class="cs-icon">◆</div>
           <h2>No history items found</h2>
-          <p>Ask a question in the Dashboard or solve a problem in the Compiler — everything will automatically appear here and sync to Supabase.</p>
+          <p>Ask a question in the Dashboard or solve a problem in the Compiler — everything will automatically appear here and sync to your private Supabase storage.</p>
         </div>`;
       return;
     }
 
-    historyListEl.innerHTML = filtered.map((item, idx) => {
+    historyListEl.innerHTML = currentFiltered.map((item, idx) => {
       let badgeClass = "badge-question";
       let badgeText = "Asked Question";
       if (item.type === "solved") {
@@ -253,14 +256,14 @@
   }
 
   window.reopenDashboard = function(idx) {
-    const item = allItems[idx];
+    const item = currentFiltered[idx];
     if (!item) return;
     localStorage.setItem("dsa_prefill_question", item.text);
     window.location.href = "dashboard.html";
   };
 
   window.reopenCompiler = function(idx) {
-    const item = allItems[idx];
+    const item = currentFiltered[idx];
     if (!item) return;
     localStorage.setItem("dsa_compiler_question", item.text);
     if (item.code) localStorage.setItem("dsa_compiler_saved_code", item.code);
@@ -280,7 +283,9 @@
 
   clearBtn.addEventListener("click", async () => {
     if (!confirm("Clear your entire history from browser and Supabase?")) return;
-    localStorage.removeItem(HISTORY_KEY);
+    if (typeof getLocalHistoryKey === "function") {
+      localStorage.removeItem(getLocalHistoryKey());
+    }
     allItems = [];
     renderList();
     const uid = encodeURIComponent(getUserIdentifier());

@@ -1,4 +1,3 @@
-const HISTORY_KEY = "dsa_history_v1";
 const HISTORY_API_BASE =
   window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
     ? "http://localhost:8000"
@@ -7,22 +6,43 @@ const HISTORY_API_BASE =
 // Wake up Render backend immediately in background
 fetch(`${HISTORY_API_BASE}/`).catch(() => {});
 
-function getUserIdentifier() {
-  const email = localStorage.getItem("dsa_user_email");
-  if (email) return email.trim().toLowerCase();
-  const name = localStorage.getItem("dsa_user_name");
-  if (name) return name.trim().toLowerCase();
-  let guestId = localStorage.getItem("dsa_guest_id");
-  if (!guestId) {
-    guestId = "guest_" + Math.random().toString(36).slice(2, 10);
-    localStorage.setItem("dsa_guest_id", guestId);
+function generateSecretToken() {
+  if (window.crypto && window.crypto.randomUUID) {
+    return window.crypto.randomUUID().replace(/-/g, "").slice(0, 16);
   }
-  return guestId;
+  return (
+    Math.random().toString(36).slice(2, 10) +
+    Math.random().toString(36).slice(2, 10)
+  );
+}
+
+// Har user + device ka apna unique secret identifier banata hai
+function getUserIdentifier() {
+  const rawName = (localStorage.getItem("dsa_user_name") || "coder")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  const cleanName = rawName || "coder";
+
+  // Har naam ke liye uske browser mein ek private secret key store hogi
+  const tokenKey = `dsa_secret_token_${cleanName}`;
+  let secret = localStorage.getItem(tokenKey);
+  if (!secret) {
+    secret = generateSecretToken();
+    localStorage.setItem(tokenKey, secret);
+  }
+
+  return `${cleanName}_${secret}`;
+}
+
+// LocalStorage key bhi har unique user identifier ke liye alag hogi
+function getLocalHistoryKey() {
+  return `dsa_history_${getUserIdentifier()}`;
 }
 
 function getHistory() {
   try {
-    return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    return JSON.parse(localStorage.getItem(getLocalHistoryKey()) || "[]");
   } catch (e) {
     return [];
   }
@@ -30,7 +50,7 @@ function getHistory() {
 
 function saveHistory(list) {
   try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 500)));
+    localStorage.setItem(getLocalHistoryKey(), JSON.stringify(list.slice(0, 500)));
   } catch (e) {}
 }
 
@@ -58,7 +78,7 @@ function addHistory(entry) {
   list.unshift(newItem);
   saveHistory(list);
 
-  // Non-blocking background sync to Supabase
+  // Non-blocking background sync to Supabase with unique secret user_identifier
   fetch(`${HISTORY_API_BASE}/api/history`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -80,7 +100,7 @@ async function fetchSupabaseHistory() {
     const res = await fetch(`${HISTORY_API_BASE}/api/history?user_identifier=${uid}`);
     if (!res.ok) return getHistory();
     const data = await res.json();
-    if (Array.isArray(data.history) && data.history.length > 0) {
+    if (Array.isArray(data.history)) {
       const cloudMapped = data.history.map((row) => ({
         id: row.id,
         time: new Date(row.created_at).getTime(),
