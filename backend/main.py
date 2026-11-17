@@ -1,6 +1,6 @@
 """
 DSA Visual Tutor - High-Speed Production Backend
-FastAPI + AsyncGroq + In-Memory Cache + Supabase History + Auth
+FastAPI + AsyncGroq + Cached Live Model Discovery + In-Memory Cache + Supabase History + Auth
 """
 
 import os
@@ -39,17 +39,17 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
 
-# Initialize AsyncGroq client for non-blocking parallel calls
-async_client = AsyncGroq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+# Initialize AsyncGroq client safely for Render Python environment
+async_client = None
+if GROQ_API_KEY:
+    try:
+        async_client = AsyncGroq(api_key=GROQ_API_KEY, http_client=httpx.AsyncClient(timeout=30))
+    except Exception:
+        async_client = AsyncGroq(api_key=GROQ_API_KEY)
 
-# Fast models prioritized first (skipping slow <think> models unless fallback needed)
-FAST_MODELS = [
-    "llama-3.3-70b-versatile",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-    "meta-llama/llama-4-maverick-17b-128e-instruct",
-    "llama-3.1-8b-instant",
-]
-_WORKING_MODEL: Optional[str] = FAST_MODELS[0]
+# Cache live models once so we never hit 404 model_not_found AND never waste time on every request
+_CACHED_MODELS: List[str] = []
+_WORKING_MODEL: Optional[str] = None
 
 # In-memory LRU-style dictionary cache for instant repeat responses
 _RESPONSE_CACHE: dict = {}
@@ -121,7 +121,7 @@ class HistoryCreateRequest(BaseModel):
     status: Optional[str] = ""
 
 
-# ---------- Helper: Cache + Fast Async Groq Caller ----------
+# ---------- Helper: Cache + Dynamic Cached Model Discovery ----------
 
 def _get_cache_key(prefix: str, *args) -> str:
     raw = prefix + ":" + "|".join(str(a).strip().lower() for a in args)
@@ -135,15 +135,58 @@ def _set_cache(key: str, val):
     _RESPONSE_CACHE[key] = val
 
 
+async def get_cached_live_models() -> List[str]:
+    """Groq API se live models ki list SIRF EK BAAR nikalta hai aur memory mein cache rakhta hai."""
+    global _CACHED_MODELS
+    if _CACHED_MODELS:
+        return _CACHED_MODELS
+
+    live_models = []
+    if async_client is not None:
+        try:
+            models_resp = await async_client.models.list()
+            for m in models_resp.data:
+                m_id = m.id
+                # Audio, whisper, guard aur embedding models ko skip karein
+                if any(skip in m_id.lower() for skip in ["whisper", "guard", "tts", "embed", "playai", "allam", "vision"]):
+                    continue
+                live_models.append(m_id)
+        except Exception:
+            pass
+
+    # Fast instruction models ko sabse aage rakhein
+    preferred_keywords = ["llama-4", "llama-3.3", "llama-3.1", "gemma", "qwen", "deepseek", "llama"]
+    sorted_models = sorted(
+        live_models,
+        key=lambda x: next((i for i, kw in enumerate(preferred_keywords) if kw in x.lower()), 999)
+    )
+
+    backups = [
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "qwen/qwen3-32b",
+        "qwen-qwq-32b",
+        "deepseek-r1-distill-llama-70b",
+    ]
+    for b in backups:
+        if b not in sorted_models:
+            sorted_models.append(b)
+
+    _CACHED_MODELS = sorted_models
+    return _CACHED_MODELS
+
+
 async def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 1024) -> str:
-    global _WORKING_MODEL
+    global _WORKING_MODEL, _CACHED_MODELS
     if async_client is None:
         raise HTTPException(
             status_code=500,
-            detail="GROQ_API_KEY not set in Environment Variables."
+            detail="GROQ_API_KEY not set. Add it to Render Environment Variables."
         )
 
-    models_to_try = list(FAST_MODELS)
+    models_to_try = list(await get_cached_live_models())
     if _WORKING_MODEL and _WORKING_MODEL in models_to_try:
         models_to_try.remove(_WORKING_MODEL)
         models_to_try.insert(0, _WORKING_MODEL)
@@ -161,6 +204,7 @@ async def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 1024)
                 max_tokens=max_tokens,
             )
             content = response.choices[0].message.content or ""
+            # DeepSeek R1 / Qwen jaise models ke <think>...</think> tags strip karein
             content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
             _WORKING_MODEL = model_to_use
             return content
@@ -168,10 +212,13 @@ async def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 1024)
             errors.append(f"{model_to_use}: {str(e)}")
             continue
 
-    raise HTTPException(status_code=502, detail=f"Groq API error: {errors[0] if errors else 'No working models'}")
+    # Agar saare models fail hue toh model cache clear karein taaki next attempt par fresh list aaye
+    _CACHED_MODELS = []
+    raise HTTPException(status_code=502, detail=f"Groq API error: {errors[0] if errors else 'No working models found'}")
 
 
 def extract_json(raw_text: str):
+    """Accurately extracts either a JSON Array [...] or JSON Object {...} depending on which appears first."""
     cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
     cleaned = re.sub(r"```json|```", "", cleaned).strip()
 
@@ -212,8 +259,8 @@ async def supabase_insert_history(item: HistoryCreateRequest):
         "status": item.status or "",
     }
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            res = await client.post(url, headers=headers, json=payload)
+        async with httpx.AsyncClient(timeout=8) as http_c:
+            res = await http_c.post(url, headers=headers, json=payload)
             if res.status_code in (200, 201):
                 return res.json()
     except Exception:
@@ -245,10 +292,12 @@ def login(req: LoginRequest):
 # ---------- Core Endpoints ----------
 
 @app.get("/")
-def health():
+async def health():
+    models = await get_cached_live_models()
     return {
         "status": "ok",
         "active_model": _WORKING_MODEL,
+        "detected_live_models": models[:8],
         "cache_entries": len(_RESPONSE_CACHE),
         "api_key_present": bool(GROQ_API_KEY),
         "supabase_connected": bool(SUPABASE_URL and SUPABASE_KEY),
@@ -263,8 +312,9 @@ async def explain_question(req: QuestionRequest):
 
     if req.explain_language == "hinglish":
         language_instruction = (
-            "Respond in natural Hinglish (Hindi-English mix, written in Roman script). "
-            "Keep technical terms in English."
+            "Respond in natural Hinglish (Hindi-English mix, written in Roman/English script "
+            "— NOT Devanagari), the way an Indian CS student casually explains things to a "
+            "friend. Keep technical terms (array, pointer, time complexity, etc.) in English."
         )
     else:
         language_instruction = "Respond in clear, simple English."
@@ -275,18 +325,21 @@ async def explain_question(req: QuestionRequest):
         if parts:
             first_name = parts[0][:20].capitalize()
     name_instruction = (
-        f"Address the student as '{first_name} ji' at the start and once naturally later. "
+        f"The student's name is {first_name}. Start the explanation by addressing them as "
+        f"'{first_name} ji' (first name followed by 'ji'), and use '{first_name} ji' once more "
+        "naturally later in the explanation. "
         if first_name else ""
     )
 
     system_prompt = (
         "You are a friendly DSA tutor for Indian CS students preparing for placements. "
         "Explain the given problem in simple language: what it's asking, a real-world "
-        "analogy, and constraints/edge cases to watch for. Keep it under 140 words. "
-        f"{name_instruction}{language_instruction} "
+        "analogy, and constraints/edge cases to watch for. Keep it under 150 words. "
+        f"{name_instruction}"
+        f"{language_instruction} "
         "Respond in plain text, no markdown headers."
     )
-    text = await call_llm(system_prompt, req.question, max_tokens=400)
+    text = await call_llm(system_prompt, req.question, max_tokens=450)
     _set_cache(cache_key, text)
     return {"explanation": text}
 
@@ -305,14 +358,22 @@ async def get_approaches(req: QuestionRequest):
         '"is_best" (boolean), "why" (1-2 sentence reasoning). '
         "IMPORTANT: Your output MUST start with '[' and end with ']'."
     )
-    raw = await call_llm(system_prompt, req.question, max_tokens=600)
+    raw = await call_llm(system_prompt, req.question, max_tokens=650)
     try:
         parsed = extract_json(raw)
+
         if isinstance(parsed, list):
             approaches = parsed
         elif isinstance(parsed, dict):
-            found_list = next((v for v in parsed.values() if isinstance(v, list)), None)
-            approaches = found_list if found_list is not None else [parsed]
+            found_list = None
+            for val in parsed.values():
+                if isinstance(val, list):
+                    found_list = val
+                    break
+            if found_list is not None:
+                approaches = found_list
+            else:
+                approaches = [parsed]
         else:
             approaches = []
 
@@ -326,8 +387,10 @@ async def get_approaches(req: QuestionRequest):
                     "is_best": bool(item.get("is_best", idx == len(approaches) - 1)),
                     "why": str(item.get("why", "Standard approach for this problem."))
                 })
+
         if not clean_approaches:
-            raise ValueError("Empty approaches")
+            raise ValueError("Empty approaches list")
+
     except Exception:
         raise HTTPException(status_code=502, detail="LLM returned invalid JSON. Try again.")
 
@@ -337,7 +400,7 @@ async def get_approaches(req: QuestionRequest):
 
 @app.post("/api/analyze")
 async def analyze_combined(req: QuestionRequest):
-    """Combined parallel endpoint: runs explain + approaches concurrently for 2x speed."""
+    """Combined parallel endpoint: runs explain + approaches concurrently."""
     exp_res, app_res = await asyncio.gather(
         explain_question(req),
         get_approaches(req)
@@ -356,29 +419,58 @@ async def dry_run(req: DryRunRequest):
 
     if req.narrate_language == "hinglish":
         action_language_instruction = (
-            "Write every 'action' description in natural Hinglish (Roman script)."
+            "Write every 'action' description in natural Hinglish (Hindi-English mix, "
+            "Roman script — NOT Devanagari), keeping technical terms in English."
         )
     else:
         action_language_instruction = "Write every 'action' description in clear, proper English."
 
     system_prompt = (
-        "You are a DSA visualizer engine. Given a problem and a chosen approach, simulate the "
-        "algorithm on a SMALL sample input and return ONLY valid JSON (no markdown).\n\n"
-        "STEP 1 — Decide structure_type: \"array\", \"tree\", or \"graph\".\n"
-        "STEP 2 — Return JSON in ONE of these two shapes:\n"
+        "You are a DSA visualizer engine for a student-facing learning tool. Given a problem "
+        "and a chosen approach, simulate the algorithm on a SMALL sample input and return "
+        "ONLY valid JSON (no markdown, no commentary, no code fences).\n\n"
+        "STEP 1 — Decide the structure_type:\n"
+        "- \"array\" for array/string/two-pointer/sliding-window/sorting/searching problems.\n"
+        "- \"tree\" for binary tree / BST problems.\n"
+        "- \"graph\" for graph traversal / shortest-path / connectivity problems.\n\n"
+        "STEP 2 — Return JSON in ONE of these two shapes, matching structure_type:\n\n"
         "=== SHAPE A (structure_type = \"array\") ===\n"
-        '{"structure_type": "array", "input": [...], "steps": [{"array": [...], "highlight": [0], '
-        '"pointers": {"i": 0}, "action": "2 sentences explaining pointers, comparison, and next move.", "swapped": false}]}\n'
+        "{\n"
+        '  "structure_type": "array",\n'
+        '  "input": [ ... ],\n'
+        '  "steps": [\n'
+        "    {\n"
+        '      "array": [ ... state AFTER this step\'s change, if any ... ],\n'
+        '      "highlight": [ indices touched this step ],\n'
+        '      "pointers": { "i": 0, "j": 1 },\n'
+        '      "action": "2-3 full sentences explaining which pointer(s) are involved, what values they are looking at, what comparison or operation happens, and how pointers move next.",\n'
+        '      "swapped": false\n'
+        "    }\n"
+        "  ]\n"
+        "}\n\n"
         "=== SHAPE B (structure_type = \"tree\" or \"graph\") ===\n"
-        '{"structure_type": "tree", "nodes": [{"id": "A", "value": 5, "x": 350, "y": 50}], '
-        '"edges": [{"from": "A", "to": "B"}], "steps": [{"current": "A", "visited": ["A"], '
-        '"frontier": ["B"], "active_edge": {"from": "A", "to": "B"}, "pointers": {"curr": "A"}, '
-        '"action": "2 sentences explaining node visit and neighbours."}]}\n'
-        "Keep steps between 5 and 10. Max 6 array elements or 8 nodes. "
-        f"{action_language_instruction}"
+        "{\n"
+        '  "structure_type": "tree" | "graph",\n'
+        '  "nodes": [ { "id": "A", "value": 5, "x": 0-700, "y": 0-320 } ],\n'
+        '  "edges": [ { "from": "A", "to": "B" } ],\n'
+        '  "steps": [\n'
+        "    {\n"
+        '      "current": "A",\n'
+        '      "visited": [ "A", "B" ],\n'
+        '      "frontier": [ "C", "D" ],\n'
+        '      "active_edge": { "from": "A", "to": "B" } | null,\n'
+        '      "pointers": { "queue_front": "C" },\n'
+        '      "action": "2-3 full sentences explaining what node is visited, why it was chosen, and what happens next."\n'
+        "    }\n"
+        "  ]\n"
+        "}\n\n"
+        "General rules: keep steps between 5 and 12. Use a small sample (max 7 array elements, "
+        "or max 10 tree/graph nodes). "
+        f"{action_language_instruction} "
+        "Pick exactly one shape based on structure_type."
     )
     user_prompt = f"Problem: {req.question}\nApproach to simulate: {req.approach}"
-    raw = await call_llm(system_prompt, user_prompt, max_tokens=1400)
+    raw = await call_llm(system_prompt, user_prompt, max_tokens=1500)
     try:
         trace = extract_json(raw)
         if isinstance(trace, list):
@@ -401,13 +493,22 @@ async def translate_text(req: TranslateRequest):
         return {"text": _RESPONSE_CACHE[cache_key]}
 
     if req.target == "hinglish":
-        instruction = "Translate into natural Hinglish (Roman script). Keep technical terms in English."
+        instruction = (
+            "Translate/rewrite the following text into natural Hinglish (Hindi-English mix, "
+            "Roman script — NOT Devanagari). Keep technical terms in English."
+        )
     elif req.target == "hindi":
-        instruction = "Translate into clear Hindi using Devanagari script. Keep technical terms in English."
+        instruction = (
+            "Translate the following text into clear, simple Hindi using Devanagari script. "
+            "Keep technical programming terms in English/Roman script."
+        )
     else:
-        instruction = "Translate into clear, simple English."
+        instruction = "Translate/rewrite the following text into clear, simple English."
 
-    system_prompt = f"{instruction} Return ONLY the translated text, no preamble."
+    system_prompt = (
+        f"{instruction} Return ONLY the translated text, no preamble, no quotes, "
+        "no markdown formatting."
+    )
     translated = await call_llm(system_prompt, req.text, max_tokens=500)
     _set_cache(cache_key, translated)
     return {"text": translated}
@@ -436,8 +537,8 @@ async def fetch_user_history(user_identifier: str = "guest", limit: int = 100):
         "Authorization": f"Bearer {SUPABASE_KEY}",
     }
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            res = await client.get(url, headers=headers)
+        async with httpx.AsyncClient(timeout=8) as http_c:
+            res = await http_c.get(url, headers=headers)
             if res.status_code == 200:
                 return {"history": res.json(), "supabase_connected": True}
     except Exception:
@@ -456,8 +557,8 @@ async def clear_user_history(user_identifier: str):
         "Authorization": f"Bearer {SUPABASE_KEY}",
     }
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            await client.delete(url, headers=headers)
+        async with httpx.AsyncClient(timeout=8) as http_c:
+            await http_c.delete(url, headers=headers)
     except Exception:
         pass
     return {"status": "cleared"}
@@ -468,13 +569,18 @@ async def clear_user_history(user_identifier: str):
 async def get_piston_version(language_id: str) -> str:
     if language_id in _piston_runtime_cache:
         return _piston_runtime_cache[language_id]
-    async with httpx.AsyncClient(timeout=10) as http_client:
-        res = await http_client.get(f"{PISTON_URL}/runtimes")
-        res.raise_for_status()
-        for rt in res.json():
-            if rt["language"] == language_id:
-                _piston_runtime_cache[language_id] = rt["version"]
-                return rt["version"]
+    try:
+        async with httpx.AsyncClient(timeout=15) as http_client:
+            res = await http_client.get(f"{PISTON_URL}/runtimes")
+            res.raise_for_status()
+            runtimes = res.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Could not reach code execution service: {e}")
+
+    for rt in runtimes:
+        if rt["language"] == language_id:
+            _piston_runtime_cache[language_id] = rt["version"]
+            return rt["version"]
     raise HTTPException(status_code=400, detail=f"Unsupported language: {language_id}")
 
 
@@ -486,6 +592,7 @@ async def run_code(req: RunCodeRequest):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
             f.write(req.code)
             temp_file_name = f.name
+
         try:
             process = subprocess.run(
                 [sys.executable, temp_file_name],
@@ -508,14 +615,25 @@ async def run_code(req: RunCodeRequest):
                 os.unlink(temp_file_name)
             return {
                 "stdout": "",
-                "stderr": "Error: Code execution timed out (5s limit).",
+                "stderr": "Error: Code execution timed out (limit: 5 seconds).",
+                "compile_output": "",
+                "exit_code": -1,
+                "language": "python",
+                "version": "3.x"
+            }
+        except Exception as e:
+            if os.path.exists(temp_file_name):
+                os.unlink(temp_file_name)
+            return {
+                "stdout": "",
+                "stderr": str(e),
                 "compile_output": "",
                 "exit_code": -1,
                 "language": "python",
                 "version": "3.x"
             }
 
-    # Piston Execution for C++, Java, JavaScript
+    # Execute C++, Java, JavaScript via Piston API
     try:
         version = await get_piston_version(language_id)
         payload = {
@@ -549,7 +667,7 @@ async def run_code(req: RunCodeRequest):
         }
 
 
-# ---------- Unique Visitor Telemetry ----------
+# ---------- Zero-Duplicate Unique Visitor Counter ----------
 
 TELEMETRY_FILE = os.path.join(os.path.dirname(__file__), "visitors_store.json")
 BASE_CODERS_COUNT = 54
@@ -587,18 +705,21 @@ def register_unique_visit(req: TelemetryPing, request: Request):
         data["fingerprints"].append(clean_fp)
         data["ips"].append(combined_key)
         is_new_device = True
+
         short_id = clean_fp[:5].lower()
+        masked_email = f"coder.{short_id}***@gmail.com"
         data["recent"].insert(0, {
             "id": f"DEV-{clean_fp[:6].upper()}",
-            "email": f"coder.{short_id}***@gmail.com",
+            "email": masked_email,
             "platform": req.platform,
             "action": "Active on DSA Workspace"
         })
         data["recent"] = data["recent"][:10]
         _save_telemetry(data)
 
+    total_unique = BASE_CODERS_COUNT + len(data["fingerprints"])
     return {
-        "total_unique_coders": BASE_CODERS_COUNT + len(data["fingerprints"]),
+        "total_unique_coders": total_unique,
         "is_new_device": is_new_device,
         "device_badge": f"DEV-{clean_fp[:6].upper()}",
         "recent_devices": data["recent"]
