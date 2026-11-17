@@ -15,7 +15,7 @@ function generateSecretToken() {
   );
 }
 
-// Har browser/device ka ek fixed secret identifier jo kabhi nahi badlega
+// Har browser/device ka apna unique secret identifier (Tarika 1)
 function getUserIdentifier() {
   let uid = localStorage.getItem(DEVICE_UID_KEY);
   if (!uid) {
@@ -31,14 +31,7 @@ function getLocalHistoryKey() {
 
 function getHistory() {
   try {
-    const current = JSON.parse(localStorage.getItem(PERMANENT_HISTORY_KEY) || "[]");
-    // Purani keys mein agar koi data pada ho toh use bhi utha kar merge kar lein
-    const oldV1 = JSON.parse(localStorage.getItem("dsa_history_v1") || "[]");
-    if (oldV1.length > 0 && current.length === 0) {
-      localStorage.setItem(PERMANENT_HISTORY_KEY, JSON.stringify(oldV1));
-      return oldV1;
-    }
-    return current;
+    return JSON.parse(localStorage.getItem(PERMANENT_HISTORY_KEY) || "[]");
   } catch (e) {
     return [];
   }
@@ -50,7 +43,6 @@ function saveHistory(list) {
   } catch (e) {}
 }
 
-// entry: { type: "question" | "dryrun" | "solved", text, approach?, language?, code?, status? }
 function addHistory(entry) {
   if (!entry || !entry.text) return;
 
@@ -71,18 +63,18 @@ function addHistory(entry) {
     id: Date.now() + "-" + Math.random().toString(36).slice(2, 7),
     time: Date.now(),
     type: entry.type || "question",
-    text: entry.text.trim(),
+    text: String(entry.text).trim(),
     approach: entry.approach || "",
     language: entry.language || "",
     code: entry.code || "",
     status: entry.status || "Completed",
   };
 
-  // 1. Pehle turant browser ke localStorage mein save karein (Guaranteed Instant Display)
+  // 1. Turant Browser LocalStorage mein save karein
   list.unshift(newItem);
   saveHistory(list);
 
-  // 2. Background mein Supabase par sync karein
+  // 2. Render Backend ke through Supabase mein save karein
   fetch(`${HISTORY_API_BASE}/api/history`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -98,7 +90,6 @@ function addHistory(entry) {
   }).catch(() => {});
 }
 
-// Local data aur Supabase data ko smartly merge karega (Local data ko kabhi delete nahi karega!)
 async function fetchSupabaseHistory() {
   const localItems = getHistory();
   try {
@@ -120,18 +111,16 @@ async function fetchSupabaseHistory() {
         fromCloud: true,
       }));
 
-      // Merge cloud items with local items without losing any local unsynced items
+      // Local aur Cloud data ko merge karein (Local data kabhi delete nahi hoga)
       const combined = [...localItems];
       cloudMapped.forEach((cItem) => {
-        const alreadyExists = combined.some(
+        const exists = combined.some(
           (lItem) =>
             lItem.type === cItem.type &&
             lItem.text === cItem.text &&
             Math.abs((lItem.time || 0) - (cItem.time || 0)) < 60000
         );
-        if (!alreadyExists) {
-          combined.push(cItem);
-        }
+        if (!exists) combined.push(cItem);
       });
 
       combined.sort((a, b) => (b.time || 0) - (a.time || 0));
