@@ -348,7 +348,7 @@ async def explain_question(req: QuestionRequest):
             first_name = parts[0][:20].capitalize()
     name_instruction = (
         f"The student's name is {first_name}. Start the explanation by addressing them as "
-        f"'{first_name} ji' (first name followed by 'ji'), and use '{first_name} ji' once more "
+        f"'{first_name}' (first name), and use '{first_name}' once more "
         "naturally later in the explanation. "
         if first_name else ""
     )
