@@ -1,271 +1,386 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/AI--POWERED-DSA%20LEARNING%20PLATFORM-10B981?style=for-the-badge" alt="AI-powered DSA learning platform">
+<img src="https://img.shields.io/badge/PRODUCT-DSA%20LEARNING%20PLATFORM-10B981?style=for-the-badge" />
 
-# ⚡ DataStruct.Flow
+<h1>⚡ DataStruct.Flow</h1>
 
-### Understand the logic. See the execution. Master the algorithm.
+<h3>Where Algorithms Become Visual Experiences.</h3>
 
 <p>
-  An interactive Data Structures & Algorithms learning workspace that brings
-  AI explanations, solution analysis, algorithm visualization, coding practice,
-  and multi-language execution together in one place.
+  <b>Think Smarter. Code Better. Master DSA.</b>
 </p>
 
 <p>
-  <a href="https://datastruct-flow-frontend.vercel.app/">
-    <img src="https://img.shields.io/badge/Live%20Application-Open%20DataStruct.Flow-16A34A?style=for-the-badge&logo=vercel&logoColor=white" alt="Open live application">
-  </a>
-  <a href="https://datastruct-flow-backend.onrender.com/docs">
-    <img src="https://img.shields.io/badge/API%20Documentation-FastAPI%20Swagger-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="Open API documentation">
-  </a>
+  An AI-powered learning environment that transforms complex
+  Data Structures & Algorithms into interactive, visual,
+  and easy-to-understand experiences.
 </p>
 
-<p>
-  <img src="https://img.shields.io/badge/Python-Backend-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/FastAPI-REST%20API-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
-  <img src="https://img.shields.io/badge/JavaScript-Frontend-F7DF1E?style=flat-square&logo=javascript&logoColor=black" alt="JavaScript">
-  <img src="https://img.shields.io/badge/Groq-AI%20Inference-F55036?style=flat-square" alt="Groq">
-  <img src="https://img.shields.io/badge/Supabase-Cloud%20History-3FCF8E?style=flat-square&logo=supabase&logoColor=white" alt="Supabase">
-  <img src="https://img.shields.io/badge/CodeMirror-Code%20Editor-D30707?style=flat-square" alt="CodeMirror">
-  <img src="https://img.shields.io/badge/Deployed%20on-Vercel%20%7C%20Render-111111?style=flat-square" alt="Deployment">
-</p>
+<br/>
 
-<br>
+<a href="https://datastruct-flow-frontend.vercel.app/">
+  <img src="https://img.shields.io/badge/🚀_EXPLORE_LIVE_APP-16A34A?style=for-the-badge" />
+</a>
 
-**Learn → Compare → Visualize → Practice → Execute → Improve**
+<a href="https://datastruct-flow-backend.onrender.com/docs">
+  <img src="https://img.shields.io/badge/⚙️_API_DOCUMENTATION-2563EB?style=for-the-badge" />
+</a>
+
+<br/><br/>
+
+<img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white"/>
+<img src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white"/>
+<img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black"/>
+<img src="https://img.shields.io/badge/Groq_AI-F55036?style=flat-square"/>
+<img src="https://img.shields.io/badge/Supabase-3FCF8E?style=flat-square&logo=supabase&logoColor=white"/>
+
+<br/><br/>
 
 </div>
 
 ---
 
-## 📑 Contents
+<h2 align="center">✦ THE LEARNING EXPERIENCE</h2>
 
-- [Overview](#-overview)
-- [Live Application](#-live-application)
-- [Why DataStruct.Flow?](#-why-datastructflow)
-- [Product Features](#-product-features)
-- [DSA Learning Coverage](#-dsa-learning-coverage)
-- [Application Walkthrough](#-application-walkthrough)
-- [System Architecture](#-system-architecture)
-- [Technology Stack](#-technology-stack)
-- [Backend API](#-backend-api-reference)
-- [Project Structure](#-project-structure)
-- [Run Locally](#-run-locally)
-- [Security Notes](#-security-deployment-notes)
-- [Roadmap](#-roadmap)
-- [Contributing](#-contributing)
-- [Author](#-author)
-
----
-
-## 🎯 Overview
-
-Learning Data Structures and Algorithms is not only about finding the correct output. It is about understanding **why an approach works, how its state changes, and what makes one solution more efficient than another**.
-
-**DataStruct.Flow** is built around that learning process.
-
-A learner can submit a DSA problem, explore an AI-generated explanation, compare different solution strategies, and inspect an interactive dry run. The same workspace also provides a curated practice collection, progress views, activity history, and a code execution environment.
-
-The platform aims to make algorithmic thinking more understandable by connecting explanation with execution.
-
-## 🌐 Live Application
-
-| Component | Link |
-|---|---|
-| Frontend | [Open DataStruct.Flow](https://datastruct-flow-frontend.vercel.app/) |
-| Backend API | [Open API](https://datastruct-flow-backend.onrender.com/) |
-| Interactive API docs | [FastAPI Swagger UI](https://datastruct-flow-backend.onrender.com/docs) |
-
-> **Deployment note:** The backend is hosted on Render. If the service has been idle, its first request may take longer while the instance starts.
-
----
-
-## 💡 Why DataStruct.Flow?
-
-Traditional problem-solving often separates the explanation, code, and execution trace. DataStruct.Flow brings these learning steps into one workflow.
+<p align="center">
+  <i>From understanding a problem to mastering its optimal solution.</i>
+</p>
 
 <table>
-  <tr>
-    <td width="33%" align="center">
-      <h2>🧠</h2>
-      <b>Understand</b>
-      <p>Break down a problem with an AI-generated explanation.</p>
-    </td>
-    <td width="33%" align="center">
-      <h2>⚖️</h2>
-      <b>Compare</b>
-      <p>Explore brute-force and optimized strategies with complexity analysis.</p>
-    </td>
-    <td width="33%" align="center">
-      <h2>🎬</h2>
-      <b>Visualize</b>
-      <p>Follow the algorithm through a step-by-step execution trace.</p>
-    </td>
-  </tr>
-  <tr>
-    <td width="33%" align="center">
-      <h2>📚</h2>
-      <b>Practice</b>
-      <p>Work through curated questions across DSA topics and difficulty tiers.</p>
-    </td>
-    <td width="33%" align="center">
-      <h2>💻</h2>
-      <b>Execute</b>
-      <p>Write and run code in four supported programming languages.</p>
-    </td>
-    <td width="33%" align="center">
-      <h2>📈</h2>
-      <b>Review</b>
-      <p>Revisit activity and monitor practice progress.</p>
-    </td>
-  </tr>
+<tr>
+<td width="33%" align="center">
+
+<h1>🧠</h1>
+
+<h3>Understand</h3>
+
+AI-powered explanations that simplify complex DSA concepts into understandable logic.
+
+</td>
+<td width="33%" align="center">
+
+<h1>⚡</h1>
+
+<h3>Optimize</h3>
+
+Compare brute-force and optimal approaches with time and space complexity.
+
+</td>
+<td width="33%" align="center">
+
+<h1>🎬</h1>
+
+<h3>Visualize</h3>
+
+Watch algorithms execute through interactive, step-by-step visualizations.
+
+</td>
+</tr>
+<tr>
+<td width="33%" align="center">
+
+<h1>📚</h1>
+
+<h3>Practice</h3>
+
+Build consistency with a curated collection of 539 DSA questions.
+
+</td>
+<td width="33%" align="center">
+
+<h1>💻</h1>
+
+<h3>Execute</h3>
+
+Write and execute programs in Python, C++, Java and JavaScript.
+
+</td>
+<td width="33%" align="center">
+
+<h1>📊</h1>
+
+<h3>Improve</h3>
+
+Monitor coding activity, solved questions and learning progress.
+
+</td>
+</tr>
 </table>
 
 ---
 
-## 🚀 Product Features
+<h2 align="center">🚀 PLATFORM FEATURES</h2>
 
-### 01 · AI DSA Tutor
+<p align="center">
+  <i>A complete ecosystem designed around the way developers actually learn algorithms.</i>
+</p>
 
-**Turn a problem statement into a structured learning explanation.**
+<br/>
 
-- Submit a DSA problem or concept in natural language.
-- Generate learner-friendly explanations using the Groq API.
-- Focus on understanding the problem and its underlying logic.
-- Reuse cached responses where available.
-- Display a personalized greeting when a learner name is available.
+<table>
+<tr>
+<td width="50%" valign="top">
 
-### 02 · Solution Approach Analyzer
+<h3>01 / 🧠 AI INTELLIGENCE</h3>
 
-**Understand the trade-offs before choosing an algorithm.**
+<h2>AI DSA Tutor</h2>
 
-- Generate alternative strategies for a problem.
-- Explore brute-force and optimized approaches.
-- Compare time complexity and space complexity.
-- Review the reasoning behind each approach.
-- Select an approach and continue to its dry run.
+<p>
+  <b>Stop memorizing solutions. Start understanding logic.</b>
+</p>
 
-### 03 · Interactive Algorithm Visualizer
+An intelligent learning assistant that converts problem statements into structured explanations.
 
-**Make the algorithm's execution visible.**
+<ul>
+<li>AI-generated problem breakdowns.</li>
+<li>Concept-focused explanations.</li>
+<li>Groq-powered AI inference.</li>
+<li>Cached responses for repeated requests.</li>
+<li>Personalized learner greetings.</li>
+</ul>
 
-- Generate structured execution traces for a selected approach.
-- Inspect array states, indices, pointers, and operation descriptions.
-- Render tree- and graph-oriented traces using nodes, edges, and visit states.
-- Navigate with Previous and Next controls.
-- Use automatic playback and adjust its speed.
-- Follow optional narration in English or Hinglish.
+</td>
+<td width="50%" valign="top">
 
-### 04 · Multilingual Explanations & Voice
+<h3>02 / ⚖️ ALGORITHM ENGINEERING</h3>
 
-**Learn in a language that is comfortable to follow.**
+<h2>Approach Analyzer</h2>
 
-- English, Hindi, and Hinglish explanation options.
-- AI-powered translation through the backend.
-- ElevenLabs text-to-speech integration when configured.
-- Browser Speech Synthesis fallback when remote TTS is unavailable.
+<p>
+  <b>One problem. Multiple strategies. Better decisions.</b>
+</p>
 
-### 05 · Curated DSA Practice
+Explore how different algorithms solve the same problem and understand their efficiency.
 
-**Build consistency through structured problem practice.**
+<ul>
+<li>Brute-force approach generation.</li>
+<li>Optimized solution strategies.</li>
+<li>Time complexity comparison.</li>
+<li>Space complexity analysis.</li>
+<li>Recommended approach selection.</li>
+</ul>
 
-The practice dataset is labelled in the source as a **539-question curated sheet**.
+</td>
+</tr>
 
-- Questions organized by DSA topic.
-- Easy, Medium, and Hard difficulty levels.
-- Placement and Interview practice tiers.
-- Topic-based navigation for focused preparation.
+<tr>
+<td width="50%" valign="top">
 
-### 06 · Multi-Language Code Workspace
+<h3>03 / 🎬 VISUAL COMPUTING</h3>
 
-**Write, execute, and inspect code without leaving the platform.**
+<h2>Algorithm Visualizer</h2>
 
-| Language | Execution path |
-|---|---|
-| Python | Backend Python subprocess |
-| C++ | Piston API |
-| Java | Piston API |
-| JavaScript | Piston API |
+<p>
+  <b>See the algorithm. Understand every operation.</b>
+</p>
 
-Additional editor capabilities:
+Transform algorithmic execution into interactive visual steps.
 
-- CodeMirror 5 editor.
-- Syntax modes and line numbers.
-- Optional standard input.
-- Execution output, errors, and exit-status feedback.
-- Compiler workspace connected to selected practice questions.
-- Successful runs can be recorded in activity history.
+<ul>
+<li>Array and pointer visualization.</li>
+<li>Tree and graph execution traces.</li>
+<li>Step-by-step navigation.</li>
+<li>Automatic playback.</li>
+<li>Adjustable execution speed.</li>
+<li>English and Hinglish narration.</li>
+</ul>
 
-### 07 · Progress Dashboard
+</td>
+<td width="50%" valign="top">
 
-**Turn practice activity into a visible learning record.**
+<h3>04 / 🌐 LANGUAGE EXPERIENCE</h3>
 
-- Solved-question progress.
-- Difficulty-wise progress views.
-- GitHub-style activity heatmap.
-- Streak and milestone indicators.
-- Progress calculated from available browser-side activity records.
+<h2>Multilingual AI Learning</h2>
 
-### 08 · Activity History & Themes
+<p>
+  <b>Learn complex concepts in the language you understand.</b>
+</p>
 
-**Keep learning activity accessible and the workspace comfortable.**
+Make technical learning more accessible through language and voice support.
 
-- Browser-side history stored in Local Storage.
-- Supported history synchronization through the backend and Supabase REST API.
-- Local and cloud history entries combined when history is loaded.
-- Light theme with a warm cream and forest-green palette.
-- Dark theme with charcoal and emerald accents.
-- Theme preference saved in Local Storage.
+<ul>
+<li>English explanations.</li>
+<li>Hindi explanations.</li>
+<li>Hinglish explanations.</li>
+<li>AI-powered translation.</li>
+<li>ElevenLabs voice integration.</li>
+<li>Browser speech fallback.</li>
+</ul>
+
+</td>
+</tr>
+
+<tr>
+<td width="50%" valign="top">
+
+<h3>05 / 📚 PRACTICE ECOSYSTEM</h3>
+
+<h2>DSA Practice Arena</h2>
+
+<p>
+  <b>Turn knowledge into consistent problem-solving skills.</b>
+</p>
+
+A structured practice environment with 539 curated coding questions.
+
+<ul>
+<li>15 major DSA topic categories.</li>
+<li>Easy, Medium and Hard levels.</li>
+<li>Placement-focused questions.</li>
+<li>Interview preparation questions.</li>
+<li>Organized question navigation.</li>
+</ul>
+
+</td>
+<td width="50%" valign="top">
+
+<h3>06 / 💻 DEVELOPER WORKSPACE</h3>
+
+<h2>Multi-Language Compiler</h2>
+
+<p>
+  <b>Think. Implement. Execute. Debug.</b>
+</p>
+
+An integrated coding environment for experimenting with algorithmic solutions.
+
+<ul>
+<li>Python, C++, Java and JavaScript.</li>
+<li>CodeMirror 5 editor.</li>
+<li>Syntax highlighting.</li>
+<li>Custom standard input.</li>
+<li>Execution output and error feedback.</li>
+<li>Practice-question integration.</li>
+</ul>
+
+</td>
+</tr>
+
+<tr>
+<td width="50%" valign="top">
+
+<h3>07 / 📊 PERFORMANCE INSIGHTS</h3>
+
+<h2>Progress Analytics</h2>
+
+<p>
+  <b>Make your learning progress measurable.</b>
+</p>
+
+Monitor your coding journey through an activity-focused dashboard.
+
+<ul>
+<li>Solved-question tracking.</li>
+<li>Difficulty-wise progress.</li>
+<li>GitHub-style activity heatmap.</li>
+<li>Daily coding activity.</li>
+<li>Streak and milestone indicators.</li>
+</ul>
+
+</td>
+<td width="50%" valign="top">
+
+<h3>08 / 🗂️ LEARNING CONTINUITY</h3>
+
+<h2>Activity History</h2>
+
+<p>
+  <b>Your previous learning sessions, organized.</b>
+</p>
+
+Maintain access to supported learning and coding activities.
+
+<ul>
+<li>Browser Local Storage persistence.</li>
+<li>Supabase history synchronization.</li>
+<li>Previous activity records.</li>
+<li>Compiler activity history.</li>
+</ul>
+
+</td>
+</tr>
+</table>
 
 ---
 
-## 📚 DSA Learning Coverage
+<h2 align="center">📈 DSA LEARNING COVERAGE</h2>
 
-The practice collection groups questions across the following areas:
+<p align="center">
+  <b>539 Curated Questions · 15 Topic Categories · 5 Difficulty Tiers</b>
+</p>
 
-| Area | Topics and concepts |
-|---|---|
-| Fundamentals | Arrays, Strings |
-| Pointer Patterns | Two Pointers, Sliding Window |
-| Lookup & Frequency | Hashing |
-| Linear Structures | Stack, Queue, Linked List |
-| Searching | Binary Search |
-| Hierarchical Structures | Trees, Binary Search Tree |
-| Priority Structures | Heap / Priority Queue |
-| Networks | Graphs |
-| Problem-Solving Paradigms | Greedy, Backtracking |
-| Specialized Structures | Trie |
-| Low-Level Operations | Bit Manipulation |
-| Optimization | Dynamic Programming |
-
-**Practice tiers:** Easy · Medium · Hard · Placement · Interview
+<table>
+<tr>
+<th align="center">#</th>
+<th>Topic</th>
+<th>Core Concepts</th>
+</tr>
+<tr><td align="center">01</td><td><b>Arrays</b></td><td>Traversal, Prefix Sum, Kadane's Algorithm</td></tr>
+<tr><td align="center">02</td><td><b>Strings</b></td><td>String Manipulation, Palindromes</td></tr>
+<tr><td align="center">03</td><td><b>Two Pointers</b></td><td>Left-Right Traversal, Pair Searching</td></tr>
+<tr><td align="center">04</td><td><b>Sliding Window</b></td><td>Subarrays, Substrings, Window Optimization</td></tr>
+<tr><td align="center">05</td><td><b>Hashing</b></td><td>HashMap, Frequency Counting</td></tr>
+<tr><td align="center">06</td><td><b>Stack & Queue</b></td><td>Monotonic Stack, Queue Operations</td></tr>
+<tr><td align="center">07</td><td><b>Binary Search</b></td><td>Boundary Search, Search on Answers</td></tr>
+<tr><td align="center">08</td><td><b>Linked List</b></td><td>Reversal, Pointer Manipulation</td></tr>
+<tr><td align="center">09</td><td><b>Trees & BST</b></td><td>DFS, BFS, Tree Operations</td></tr>
+<tr><td align="center">10</td><td><b>Heap</b></td><td>Priority Queue, Top-K Elements</td></tr>
+<tr><td align="center">11</td><td><b>Graphs</b></td><td>BFS, DFS, Graph Traversal</td></tr>
+<tr><td align="center">12</td><td><b>Greedy</b></td><td>Greedy Strategies, Optimization</td></tr>
+<tr><td align="center">13</td><td><b>Backtracking</b></td><td>Recursion, State Exploration</td></tr>
+<tr><td align="center">14</td><td><b>Trie & Bit Manipulation</b></td><td>Prefix Search, Bitwise Operations</td></tr>
+<tr><td align="center">15</td><td><b>Dynamic Programming</b></td><td>Memoization, Tabulation</td></tr>
+</table>
 
 ---
 
-## 🖥️ Application Walkthrough
-
-The following workflow shows how the main learning modules fit together.
+<h2 align="center">🏗️ SYSTEM ARCHITECTURE</h2>
 
 ```mermaid
-flowchart TD
-    A["Open DataStruct.Flow"] --> B["Submit a DSA Problem"]
+flowchart TB
+    U((Learner))
 
-    B --> C["AI Explanation"]
-    B --> D["Approach Comparison"]
+    subgraph FRONTEND["Frontend Layer"]
+        UI["HTML / CSS / JavaScript"]
+        AI_UI["AI Tutor"]
+        VIS["Algorithm Visualizer"]
+        PRACTICE["Practice Sheet"]
+        IDE["Code Editor"]
+        LS[("Local Storage")]
+    end
 
-    C --> E["Understand the Problem"]
-    D --> F["Choose an Approach"]
+    subgraph BACKEND["FastAPI Backend"]
+        API["REST API"]
+        CACHE["Response Cache"]
+        HISTORY["History Service"]
+        EXEC["Execution Router"]
+    end
 
-    F --> G["Generate Dry Run"]
-    G --> H["Interactive Visualization"]
-    H --> I["Optional Voice Narration"]
+    GROQ["Groq AI"]
+    TTS["ElevenLabs"]
+    PY["Python Runtime"]
+    PISTON["Piston API"]
+    DB[("Supabase")]
 
-    J["Open Practice Sheet"] --> K["Select a Question"]
-    K --> L["Open Compiler"]
-    L --> M["Write and Execute Code"]
-    M --> N["Inspect Output and Errors"]
+    U --> UI
+    UI --> AI_UI
+    UI --> VIS
+    UI --> PRACTICE
+    UI --> IDE
 
-    I --> O["Learning Activity"]
-    N --> O
-    O --> P["Progress and History"]
+    AI_UI --> API
+    VIS --> API
+    IDE --> API
+
+    API --> CACHE
+    API --> GROQ
+    API --> TTS
+    API --> EXEC
+
+    EXEC --> PY
+    EXEC --> PISTON
+
+    API --> HISTORY
+    HISTORY --> DB
+
+    UI <--> LS
