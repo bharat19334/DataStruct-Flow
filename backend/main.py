@@ -6,17 +6,17 @@ FastAPI + AsyncGroq + Cached Live Model Discovery + In-Memory Cache + Supabase H
 import os
 import sys
 import json
-import re
-import hashlib
-import asyncio
-import subprocess
+import re # full form is Regular Expression ,Example: Email validation.
+import hashlib # Hashing
+import asyncio # Asynchronous Programming
+import subprocess # use for External Commands Execute 
 import tempfile
 from typing import Optional, List
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleware # Cross-Origin Resource Sharing
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from groq import AsyncGroq

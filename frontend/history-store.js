@@ -15,7 +15,6 @@ function generateSecretToken() {
   );
 }
 
-// Har browser/device ka apna unique secret identifier (Tarika 1)
 function getUserIdentifier() {
   let uid = localStorage.getItem(DEVICE_UID_KEY);
   if (!uid) {
